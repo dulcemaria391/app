@@ -10234,11 +10234,13 @@ var DMFactura = (function () {
 
       /* Camino bueno: compartir la imagen con el menu nativo del telefono,
          que incluye WhatsApp. */
+      /* Solo la imagen, SIN texto. Antes iba tambien textoRecibo(f) y WhatsApp
+         lo pegaba como pie de la foto: quedaba la remision escrita dos veces,
+         una en la imagen y otra debajo. Tony pidio que no se repita. */
       if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] }) && navigator.share) {
         navigator.share({
           files: [archivo],
-          title: 'Remisión ' + (f.numero_factura || ''),
-          text: textoRecibo(f)
+          title: 'Remisión ' + (f.numero_factura || '')
         }).then(function () {
           avisar('Recibo compartido', 'ok');
         }).catch(function (err) {
@@ -10262,7 +10264,12 @@ var DMFactura = (function () {
       document.body.appendChild(a); a.click();
       setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} URL.revokeObjectURL(url); }, 3000);
     } catch (e) {}
-    var enlace = 'https://wa.me/' + (tel || '') + '?text=' + encodeURIComponent(textoRecibo(f));
+    /* Este es el camino de respaldo: el navegador no pudo compartir la imagen,
+       así que se descarga y se abre el chat para adjuntarla a mano. Aquí NO va
+       la remisión escrita —eso es lo que Tony no quiere ver repetido—, solo una
+       línea que diga de qué se trata, porque si no el chat abre en blanco. */
+    var linea = 'Remisión N° ' + (f.numero_factura || '—') + ' · ' + negocio().nombre;
+    var enlace = 'https://wa.me/' + (tel || '') + '?text=' + encodeURIComponent(linea);
     window.open(enlace, '_blank');
     avisar('Se descargó la imagen del recibo. Adjúntala en el chat que se abrió.', 'info');
   }
@@ -11556,6 +11563,9 @@ var DMCostos = (function () {
   return {
     calcular: calcular, consumos: consumos, manoDeObra: manoDeObra,
     costoTarrina: costoTarrina, entrarAVentas: entrarAVentas,
+    /* marcaTurno la necesita DMDeshacer para quitar la marca de «ya entro»
+       cuando se borra un turno; si no, el turno no podria volver a entrar. */
+    marcaTurno: marcaTurno,
     par: par, pintarCombo: pintarCombo,
     POR_PAQUETE: POR_PAQUETE, POR_COMBO: POR_COMBO
   };
@@ -13259,6 +13269,306 @@ var DMApertura = (function () {
 
   return { abrir: abrir, guardar: guardar, verFila: verFila, lista: lista,
            resumen: resumen, pintar: pintar };
+})();
+
+</script>
+<script>
+/* ===== BORRAR UN REGISTRO DESHACE LO QUE HIZO ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMDeshacer — borrar un registro de producción deshace TODO lo que hizo.
+
+   El error que encontró Tony: borró un turno en Obleas, la lista de turnos
+   quedó bien, pero en Ventas seguían los paquetes que ese turno había metido
+   al stock. La función de borrar solo quitaba el renglón de la lista:
+
+       function delReg(id){ ... getTurnos().filter(r=>r.id!==id) ... }
+
+   No devolvía los insumos consumidos, no sacaba el producto terminado del
+   stock de venta, no devolvía las tarrinas que se llevaron sus combos, y no
+   quitaba la marca de «este turno ya entró». Lo mismo en Arequipe con elimReg.
+
+   Un registro de producción toca cuatro sitios. Borrarlo tiene que deshacer
+   los cuatro, o los números quedan inflados para siempre:
+
+     1. insumos consumidos        → se devuelven
+     2. producto terminado        → sale del stock de venta, con su movimiento
+     3. tarrinas de los combos    → se devuelven al stock de arequipe
+     4. la marca de «ya entró»    → se borra, para poder registrarlo de nuevo
+
+   Regla que se mantiene: cada cambio de existencias deja su movimiento. El
+   stock nunca deja de ser igual a la suma de sus movimientos, ni siquiera
+   deshaciendo. Si al deshacer el stock queda negativo, se deja negativo: eso
+   significa que ya se vendió algo de ese turno y hay que mirarlo, no taparlo.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMDeshacer = (function () {
+  'use strict';
+
+  function leer(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+  function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function num(v) { return Number(v) || 0; }
+
+  /* ── OBLEAS ──────────────────────────────────────────────────────────── */
+
+  function devolverInsumosObleas(reg) {
+    var inv = leer('obleas_inventario', {});
+    if (!Object.keys(inv).length) return 0;          /* nunca se descontó nada */
+    if (!window.DMCostos || typeof DMCostos.consumos !== 'function') return 0;
+    var cons = DMCostos.consumos(reg);
+    var movs = leer('obleas_inv_movimientos', []);
+    var n = 0;
+    Object.keys(cons).forEach(function (k) {
+      if (!cons[k]) return;
+      if (!inv[k]) inv[k] = { stock: 0, costoPromedio: 0, stockMin: 0 };
+      inv[k].stock = num(inv[k].stock) + cons[k];
+      movs.push({
+        ts: new Date().toISOString(), fecha: reg.fecha, tipo: 'entrada', insumo: k,
+        cantidad: cons[k], costoUnitario: num(inv[k].costoPromedio),
+        costoTotal: cons[k] * num(inv[k].costoPromedio),
+        proveedor: 'Turno eliminado', stockResultante: inv[k].stock
+      });
+      n++;
+    });
+    escribir('obleas_inventario', inv);
+    escribir('obleas_inv_movimientos', movs);
+    return n;
+  }
+
+  function devolverTarrinas(cant, reg) {
+    if (!(cant > 0)) return;
+    var stock = leer('dm_ar_prod', {});
+    var t = stock.tarrina || { cant: 0, costoPromedio: 0 };
+    t.cant = num(t.cant) + cant;
+    stock.tarrina = t;
+    escribir('dm_ar_prod', stock);
+    var mov = leer('dm_ar_prod_mov', []);
+    mov.unshift({
+      id: Date.now() + '_tarrina_devuelta', fecha: reg.fecha, tipo: 'entrada',
+      presentacion: 'tarrina', cant: cant, costoUnit: num(t.costoPromedio),
+      lote: reg.lote || '', ref: 'Turno de obleas eliminado: vuelven ' + cant + ' tarrina(s)'
+    });
+    escribir('dm_ar_prod_mov', mov);
+  }
+
+  function turnoObleas(reg) {
+    if (!reg) return Promise.resolve(null);
+    var paquetes = num(reg.totPaq);
+    var combos = num(reg.totC1) + num(reg.totC2) + num(reg.totC3);
+    var informe = { insumos: 0, salidas: [], tarrinas: 0 };
+
+    informe.insumos = devolverInsumosObleas(reg);
+
+    /* la marca dice si este turno llegó a entrar al stock de venta */
+    var marca = (window.DMCostos && typeof DMCostos.marcaTurno === 'function')
+      ? DMCostos.marcaTurno(reg) : null;
+    var entrados = leer('obleas_a_ventas', []);
+    var entro = marca ? entrados.indexOf(marca) >= 0 : false;
+
+    if (marca) escribir('obleas_a_ventas', entrados.filter(function (m) { return m !== marca; }));
+
+    if (!entro || (paquetes <= 0 && combos <= 0)) return Promise.resolve(informe);
+
+    var quitar = [];
+    if (paquetes > 0) quitar.push({ nombre: 'Oblea x 50 unidades', cant: paquetes });
+    if (combos > 0) quitar.push({ nombre: 'Combo de arequipe', cant: combos });
+
+    /* las tarrinas que se llevaron los combos vuelven al arequipe */
+    var porCombo = 1;
+    try { porCombo = Number(DMCostos.par().tarcomb) || 1; } catch (e) {}
+    if (combos > 0) { devolverTarrinas(combos * porCombo, reg); informe.tarrinas = combos * porCombo; }
+
+    return sacarDeVentas(quitar, 'Turno de obleas eliminado · ' + (reg.fecha || ''))
+      .then(function (hechas) { informe.salidas = hechas; return informe; });
+  }
+
+  /* ── AREQUIPE ────────────────────────────────────────────────────────── */
+
+  function loteArequipe(reg) {
+    if (!reg) return Promise.resolve(null);
+    var informe = { insumos: 0, salidas: [], produccion: [] };
+    var producto = reg.producto || 'Arequipe';
+
+    /* 1. devolver insumos y empaques */
+    var st = leer('dm_ar_inv', {});
+    var mov = leer('dm_ar_mov', []);
+    var ts = Date.now();
+    if (typeof INSUMOS_DEF !== 'undefined') {
+      INSUMOS_DEF.forEach(function (ins) {
+        var cant = (reg.insumos && num(reg.insumos[ins.id])) || 0;
+        if (cant <= 0) return;
+        if (!st[ins.id]) st[ins.id] = { cantActual: 0, costoPromedio: num(ins.precio), minimo: 0 };
+        st[ins.id].cantActual = num(st[ins.id].cantActual) + cant;
+        mov.unshift({
+          id: ts + '_dev_' + ins.id, fecha: reg.fecha, ins_id: ins.id, tipo: 'compra',
+          cant: cant, costoUnit: num(st[ins.id].costoPromedio),
+          costoPromDespues: num(st[ins.id].costoPromedio),
+          prov: '', ref: 'Lote eliminado: vuelve el insumo'
+        });
+        informe.insumos++;
+      });
+    }
+    if (typeof EMPAQUES_DEF !== 'undefined') {
+      EMPAQUES_DEF.forEach(function (e) {
+        var u = (reg.produccion && num(reg.produccion[e.campo])) || 0;
+        if (u <= 0) return;
+        if (!st[e.id]) st[e.id] = { cantActual: 0, costoPromedio: num(e.precio), minimo: 0 };
+        st[e.id].cantActual = num(st[e.id].cantActual) + u;
+        mov.unshift({
+          id: ts + '_dev_' + e.id, fecha: reg.fecha, ins_id: e.id, tipo: 'compra',
+          cant: u, costoUnit: num(st[e.id].costoPromedio),
+          costoPromDespues: num(st[e.id].costoPromedio),
+          prov: '', ref: 'Lote eliminado: vuelve el empaque'
+        });
+        informe.insumos++;
+      });
+    }
+    escribir('dm_ar_inv', st);
+    escribir('dm_ar_mov', mov);
+
+    /* 2. sacar del stock de producción de arequipe */
+    var prod = leer('dm_ar_prod', {});
+    var pmov = leer('dm_ar_prod_mov', []);
+    var quitar = [];
+    ['tetero', 'bolsa', 'tarrina'].forEach(function (present) {
+      var cant = (reg.produccion && num(reg.produccion[present])) || 0;
+      if (cant <= 0) return;
+      var k = (window.DMArequipeVentas && typeof DMArequipeVentas.claveStock === 'function')
+        ? DMArequipeVentas.claveStock(producto, present)
+        : (producto === 'Arequipe' ? present : 'lc_' + present);
+      var s = prod[k] || { cant: 0, costoPromedio: 0 };
+      s.cant = num(s.cant) - cant;
+      prod[k] = s;
+      pmov.unshift({
+        id: ts + '_del_' + k, fecha: reg.fecha, tipo: 'salida', presentacion: present,
+        producto: producto, cant: cant, costoUnit: num(s.costoPromedio),
+        lote: reg.lote || '', ref: 'Lote eliminado · ' + (reg.lote || reg.fecha)
+      });
+      informe.produccion.push(present + ' −' + cant);
+      var vendible = (window.DMArequipeVentas && typeof DMArequipeVentas.esVendible === 'function')
+        ? DMArequipeVentas.esVendible(producto, present) : (present !== 'tarrina');
+      if (vendible) {
+        var nombre = (window.DMArequipeVentas && typeof DMArequipeVentas.nombreVenta === 'function')
+          ? DMArequipeVentas.nombreVenta(producto, present) : null;
+        if (nombre) quitar.push({ nombre: nombre, cant: cant });
+      }
+    });
+    escribir('dm_ar_prod', prod);
+    escribir('dm_ar_prod_mov', pmov);
+
+    if (!quitar.length) return Promise.resolve(informe);
+    return sacarDeVentas(quitar, 'Lote de arequipe eliminado · ' + (reg.lote || reg.fecha))
+      .then(function (hechas) { informe.salidas = hechas; return informe; });
+  }
+
+  /* ── Común: sacar del inventario de Ventas dejando su movimiento ─────── */
+  function sacarDeVentas(items, motivo) {
+    if (typeof dbGetAll !== 'function' || typeof dbPut !== 'function') {
+      return Promise.resolve([]);
+    }
+    return dbGetAll(STORE_INVENTARIO).then(function (inv) {
+      var ps = [], hechas = [];
+      items.forEach(function (q) {
+        var clave = prodKey({ nombre: q.nombre });
+        var it = inv.filter(function (x) { return x.key === clave; })[0];
+        if (!it) return;
+        it.stock = num(it.stock) - q.cant;          /* puede quedar negativo: es un aviso */
+        ps.push(dbPut(STORE_INVENTARIO, it));
+        ps.push(dbPut(STORE_MOVS, {
+          id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
+          prodKey: clave, tipo: 'salida', cantidad: q.cant,
+          fecha: (typeof hoyISO === 'function' ? hoyISO() : ''),
+          ref: motivo, ts: Date.now()
+        }));
+        hechas.push(q.nombre + ' −' + q.cant + ' (queda ' + it.stock + ')');
+      });
+      return Promise.all(ps).then(function () { return hechas; });
+    }).catch(function (e) { console.warn('sacarDeVentas:', e); return []; });
+  }
+
+  /* ── Instalación: se envuelven las dos funciones de borrar ───────────── */
+  function instalar() {
+    var listo = 0;
+
+    if (typeof window.delReg === 'function' && !window.delReg._dm) {
+      var borrarObleas = window.delReg;
+      var nuevoOb = function (id) {
+        var reg = null;
+        try {
+          var arr = (typeof getTurnos === 'function') ? getTurnos() : [];
+          for (var i = 0; i < arr.length; i++) if (arr[i].id === id) reg = arr[i];
+        } catch (e) {}
+        if (!reg) return borrarObleas.call(this, id);
+        if (!confirm('¿Eliminar este turno?\n\nSe devolverán los insumos que consumió y ' +
+                     'se sacará del stock de venta lo que produjo (' +
+                     num(reg.totPaq) + ' paquete(s) y ' +
+                     (num(reg.totC1) + num(reg.totC2) + num(reg.totC3)) + ' combo(s)).')) return;
+        return turnoObleas(reg).then(function (inf) {
+          /* se borra sin volver a preguntar */
+          var antes = window.confirm; window.confirm = function () { return true; };
+          try { borrarObleas.call(window, id); } finally { window.confirm = antes; }
+          avisarDeshecho(inf);
+        });
+      };
+      nuevoOb._dm = true;
+      window.delReg = nuevoOb;
+      listo++;
+    }
+
+    if (typeof window.elimReg === 'function' && !window.elimReg._dm) {
+      var borrarAr = window.elimReg;
+      var nuevoAr = function (id) {
+        var reg = null;
+        try {
+          var arr = (typeof getRegistros === 'function') ? getRegistros() : [];
+          for (var i = 0; i < arr.length; i++) if (arr[i].id === id) reg = arr[i];
+        } catch (e) {}
+        if (!reg) return borrarAr.call(this, id);
+        var p = reg.produccion || {};
+        if (!confirm('¿Eliminar este lote?\n\nSe devolverán los insumos y empaques que usó, ' +
+                     'y saldrá del stock lo que produjo (' +
+                     num(p.tetero) + ' tetero, ' + num(p.bolsa) + ' bolsa, ' +
+                     num(p.tarrina) + ' tarrina).')) return;
+        return loteArequipe(reg).then(function (inf) {
+          var antes = window.confirm; window.confirm = function () { return true; };
+          try { borrarAr.call(window, id); } finally { window.confirm = antes; }
+          avisarDeshecho(inf);
+        });
+      };
+      nuevoAr._dm = true;
+      window.elimReg = nuevoAr;
+      listo++;
+    }
+    return listo;
+  }
+
+  function avisarDeshecho(inf) {
+    if (!inf) return;
+    var partes = [];
+    if (inf.insumos) partes.push(inf.insumos + ' insumo(s) devuelto(s)');
+    if (inf.salidas && inf.salidas.length) partes.push(inf.salidas.join(', '));
+    if (inf.tarrinas) partes.push(inf.tarrinas + ' tarrina(s) devuelta(s)');
+    if (inf.produccion && inf.produccion.length) partes.push(inf.produccion.join(', '));
+    var msg = partes.length ? 'Deshecho: ' + partes.join(' · ') : 'Registro eliminado';
+    try {
+      if (typeof toast === 'function') toast(msg, 'ok');
+      else if (typeof showAlrt === 'function') showAlrt('inv', msg, 'ok');
+    } catch (e) {}
+    try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {}
+  }
+
+  function arrancar(intentos) {
+    intentos = intentos || 0;
+    if (instalar() >= 2 || intentos > 60) return;
+    setTimeout(function () { arrancar(intentos + 1); }, 200);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
+  } else { arrancar(0); }
+
+  return { turnoObleas: turnoObleas, loteArequipe: loteArequipe,
+           sacarDeVentas: sacarDeVentas, instalar: instalar };
 })();
 
 </script>
