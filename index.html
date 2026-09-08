@@ -2240,6 +2240,7 @@ var DM = (function () {
       try { if (window.DMPrestamos) DMPrestamos.pintar(); } catch (e) {}
       try { if (window.DMNomina) DMNomina.pintar(); } catch (e) {}
       try { if (window.DMSync) DMSync.pintar(); } catch (e) {}
+      try { if (window.DMApertura) DMApertura.pintar(); } catch (e) {}
       try { var pf = document.getElementById('dm-prest-fecha');
         if (pf && !pf.value) pf.value = new Date().toISOString().slice(0, 10); } catch (e) {}
     }
@@ -2444,10 +2445,42 @@ var DM = (function () {
     });
   }
 
+  /* ── Las ventanas emergentes viven dentro del módulo de Ventas ───────────
+     Al unir las tres apps, el modal (#modal-bg) quedó dentro de #mod-ventas,
+     y los módulos que no están activos se ocultan enteros. Resultado: si
+     abrías el ⚙️ estando en Obleas y pulsabas «Poner precios», «Poner
+     teléfonos», «Saldos de apertura» o «Contar insumos», la ventana se abría
+     de verdad pero medía 0×0 — no pasaba nada y no había forma de saber por
+     qué. Comprobado: 0×0 desde Obleas y desde Arequipe, 420×900 desde Ventas.
+     Se arregla en la raíz: cualquiera que abra una ventana cambia primero a
+     Ventas. Así vale para los botones de hoy y para los que vengan. */
+  function instalarModalGlobal(intentos) {
+    intentos = intentos || 0;
+    if (typeof window.abrirModal !== 'function') {
+      if (intentos < 60) setTimeout(function () { instalarModalGlobal(intentos + 1); }, 150);
+      return;
+    }
+    if (window.abrirModal._dm) return;
+    var original = window.abrirModal;
+    var envuelta = function () {
+      try {
+        var cont = document.getElementById('mod-ventas');
+        if (cont && !cont.classList.contains('on')) ir('ventas');
+      } catch (e) {}
+      return original.apply(this, arguments);
+    };
+    envuelta._dm = true;
+    window.abrirModal = envuelta;
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { setTimeout(iniciar, 0); });
+    document.addEventListener('DOMContentLoaded', function () {
+      setTimeout(iniciar, 0);
+      setTimeout(function () { instalarModalGlobal(0); }, 0);
+    });
   } else {
     setTimeout(iniciar, 0);
+    setTimeout(function () { instalarModalGlobal(0); }, 0);
   }
 
   return {
@@ -12962,6 +12995,274 @@ var DMSaldos = (function () {
 
 </script>
 <script>
+/* ===== CONTEO DE INSUMOS EN BODEGA ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMApertura — cargar el inventario de insumos que hay HOY en bodega.
+
+   Hasta ahora, para meter el inventario había que registrar una compra por
+   cada insumo, uno por uno: 8 en obleas y unos 30 en arequipe, cada uno con
+   su formulario. Nadie hace eso bien.
+
+   Esta pantalla los lista TODOS juntos, ya con lo que la app cree que hay y
+   con el último costo conocido. Tony escribe lo que contó de verdad y guarda
+   una sola vez.
+
+   Detalle importante: esto NO es una compra, es un CONTEO. Si la app creía
+   que había 300 kg y hay 280, se anota una salida de 20 con la razón
+   «Conteo de inventario»; si hay 350, una entrada de 50. Así el stock nunca
+   deja de ser igual a la suma de sus movimientos, que es la única forma de
+   que el kardex sirva para algo.
+
+   Tampoco mueve plata: la de estos insumos ya salió antes de que existiera
+   la app. Lo que aún no se haya pagado va en Finanzas · Por pagar.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMApertura = (function () {
+  'use strict';
+
+  function esc2(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function hoy() { return new Date().toISOString().slice(0, 10); }
+  function leer(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+  function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function pesos(v) { return '$' + Math.round(num(v)).toLocaleString('es-CO'); }
+
+  /* ── Qué insumos tiene cada módulo ───────────────────────────────────── */
+  function lista(modulo) {
+    var out = [];
+    if (modulo === 'obleas') {
+      if (typeof INSUMOS_CAT === 'undefined') return out;
+      var inv = leer('obleas_inventario', {});
+      Object.keys(INSUMOS_CAT).forEach(function (id) {
+        var c = INSUMOS_CAT[id], s = inv[id] || {};
+        out.push({
+          id: id, nombre: c.nombre, unidad: c.unidad,
+          cant: num(s.stock), costo: num(s.costoPromedio) || num(c.costoBase), grupo: 'Insumos'
+        });
+      });
+      return out;
+    }
+    if (typeof INSUMOS_DEF === 'undefined') return out;
+    var st = leer('dm_ar_inv', {});
+    INSUMOS_DEF.forEach(function (i) {
+      var nombre = i.nombre;
+      if (i.id === 'insumo_libre') {
+        nombre = (localStorage.getItem('dm_insumo_libre') || '').trim();
+        if (!nombre) return;                      /* sin nombre, no se muestra */
+      }
+      var s = st[i.id] || {};
+      out.push({
+        id: i.id, nombre: nombre, unidad: i.unidad,
+        cant: num(s.cantActual), costo: num(s.costoPromedio) || num(i.precio),
+        grupo: 'Materias primas'
+      });
+    });
+    if (typeof EMPAQUES_DEF !== 'undefined') {
+      EMPAQUES_DEF.forEach(function (e) {
+        var s = st[e.id] || {};
+        out.push({
+          id: e.id, nombre: e.nombre, unidad: e.unidad,
+          cant: num(s.cantActual), costo: num(s.costoPromedio) || num(e.precio),
+          grupo: 'Empaques'
+        });
+      });
+    }
+    return out;
+  }
+
+  /* ── La pantalla ─────────────────────────────────────────────────────── */
+  function abrir(modulo) {
+    if (typeof abrirModal !== 'function') {
+      alert('Abre primero el módulo de Ventas y vuelve a intentar.');
+      return;
+    }
+    var items = lista(modulo);
+    if (!items.length) {
+      alert('No se encontró la lista de insumos de ' + modulo + '.');
+      return;
+    }
+    var grupoActual = '', filas = '';
+    items.forEach(function (it) {
+      if (it.grupo !== grupoActual) {
+        grupoActual = it.grupo;
+        filas += '<div style="margin:12px 0 4px;font-size:.72rem;font-weight:700;' +
+                 'text-transform:uppercase;letter-spacing:.4px;color:var(--gris)">' +
+                 esc2(grupoActual) + '</div>';
+      }
+      filas +=
+        '<div style="display:flex;gap:6px;align-items:center;padding:5px 0;' +
+        'border-bottom:1px solid var(--crema2)">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:.82rem;font-weight:600;overflow:hidden;' +
+            'text-overflow:ellipsis;white-space:nowrap">' + esc2(it.nombre) + '</div>' +
+            '<div style="font-size:.66rem;color:var(--gris)">en ' + esc2(it.unidad) +
+            ' · la app cree que hay ' + (Math.round(it.cant * 1000) / 1000) + '</div>' +
+          '</div>' +
+          '<input type="number" step="any" min="0" class="dma-cant" data-id="' + esc2(it.id) + '" ' +
+            'value="' + it.cant + '" style="width:82px;flex-shrink:0" ' +
+            'oninput="DMApertura.verFila(this)">' +
+          '<input type="number" step="any" min="0" class="dma-costo" data-id="' + esc2(it.id) + '" ' +
+            'value="' + (Math.round(it.costo * 100) / 100) + '" style="width:82px;flex-shrink:0" ' +
+            'title="Costo por ' + esc2(it.unidad) + '">' +
+        '</div>' +
+        '<div class="dma-dif" data-id="' + esc2(it.id) + '" ' +
+        'style="font-size:.68rem;text-align:right;color:var(--gris);margin:-2px 0 2px"></div>';
+    });
+
+    abrirModal(
+      '<h3>🏁 Inventario de insumos ' + (modulo === 'obleas' ? 'de obleas' : 'de arequipe') + '</h3>' +
+      '<p style="font-size:.8rem;color:var(--gris);margin-bottom:4px">' +
+      'Escribe lo que <strong>contaste hoy en bodega</strong> y el costo por unidad. ' +
+      'Lo que no hayas contado, déjalo como está.</p>' +
+      '<div style="display:flex;gap:6px;font-size:.62rem;color:var(--gris);' +
+      'text-transform:uppercase;letter-spacing:.4px;padding-bottom:4px">' +
+        '<div style="flex:1"></div><div style="width:82px">Cantidad</div>' +
+        '<div style="width:82px">Costo/und</div></div>' +
+      '<div style="max-height:52vh;overflow-y:auto">' + filas + '</div>' +
+      '<div class="btn-row">' +
+      '<button class="btn btn-primary btn-sm" onclick="DMApertura.guardar(\'' + modulo + '\')">' +
+      '💾 Guardar el conteo</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>' +
+      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+      'Esto es un <strong>conteo</strong>, no una compra: la diferencia queda en el ' +
+      'kardex como ajuste y <strong>no mueve la plata</strong>. Lo que tengas en ' +
+      'bodega y aún no hayas pagado, anótalo en Finanzas · Por pagar.</div>');
+  }
+
+  /* Muestra la diferencia mientras se teclea, para que se note un dedazo. */
+  function verFila(input) {
+    var id = input.getAttribute('data-id');
+    var caja = document.querySelector('.dma-dif[data-id="' + id + '"]');
+    if (!caja) return;
+    var fila = input.parentNode;
+    var texto = fila.textContent || '';
+    var m = texto.match(/hay (-?[\d.]+)/);
+    var antes = m ? Number(m[1]) : 0;
+    var d = num(input.value) - antes;
+    if (Math.abs(d) < 0.0005) { caja.innerHTML = ''; return; }
+    caja.innerHTML = '<span style="color:' + (d > 0 ? '#2A6B4A' : '#B03020') + '">' +
+      (d > 0 ? 'entran ' : 'salen ') + (Math.round(Math.abs(d) * 1000) / 1000) + '</span>';
+  }
+
+  /* ── Guardar ─────────────────────────────────────────────────────────── */
+  function guardar(modulo) {
+    var fecha = hoy();
+    var cants = {}, costos = {};
+    Array.prototype.forEach.call(document.querySelectorAll('.dma-cant'), function (i) {
+      cants[i.getAttribute('data-id')] = num(i.value);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.dma-costo'), function (i) {
+      costos[i.getAttribute('data-id')] = num(i.value);
+    });
+
+    var cambios = 0, tocados = 0;
+
+    if (modulo === 'obleas') {
+      var inv = leer('obleas_inventario', {});
+      var movs = leer('obleas_inv_movimientos', []);
+      Object.keys(cants).forEach(function (id) {
+        var antes = num((inv[id] || {}).stock);
+        var ahora = cants[id];
+        var costo = costos[id];
+        var dif = ahora - antes;
+        if (!inv[id]) inv[id] = { stock: 0, costoPromedio: 0, stockMin: 0 };
+        if (typeof INSUMOS_CAT !== 'undefined' && INSUMOS_CAT[id]) {
+          inv[id].stockMin = inv[id].stockMin || INSUMOS_CAT[id].stockMin || 0;
+        }
+        if (num(inv[id].costoPromedio) !== costo) { inv[id].costoPromedio = costo; tocados++; }
+        if (Math.abs(dif) < 0.0005) return;
+        inv[id].stock = ahora;
+        movs.push({
+          ts: new Date().toISOString(), fecha: fecha,
+          tipo: dif > 0 ? 'entrada' : 'salida', insumo: id,
+          cantidad: Math.abs(dif), costoUnitario: costo,
+          costoTotal: Math.abs(dif) * costo,
+          proveedor: 'Conteo de inventario', stockResultante: ahora
+        });
+        cambios++;
+      });
+      escribir('obleas_inventario', inv);
+      escribir('obleas_inv_movimientos', movs);
+      try { if (typeof renderInvStock === 'function') renderInvStock(); } catch (e) {}
+      try { if (typeof renderComprasRecientes === 'function') renderComprasRecientes(); } catch (e) {}
+    } else {
+      var st = leer('dm_ar_inv', {});
+      var mov = leer('dm_ar_mov', []);
+      var ts = Date.now();
+      Object.keys(cants).forEach(function (id, k) {
+        var antes = num((st[id] || {}).cantActual);
+        var ahora = cants[id];
+        var costo = costos[id];
+        var dif = ahora - antes;
+        if (!st[id]) st[id] = { cantActual: 0, costoPromedio: 0, minimo: 0 };
+        if (num(st[id].costoPromedio) !== costo) { st[id].costoPromedio = costo; tocados++; }
+        if (Math.abs(dif) < 0.0005) return;
+        st[id].cantActual = ahora;
+        mov.unshift({
+          id: ts + '_' + id, fecha: fecha, ins_id: id,
+          tipo: dif > 0 ? 'compra' : 'consumo', cant: Math.abs(dif),
+          costoUnit: costo, costoPromDespues: costo,
+          prov: 'Conteo', ref: 'Conteo de inventario'
+        });
+        cambios++;
+      });
+      escribir('dm_ar_inv', st);
+      escribir('dm_ar_mov', mov);
+      /* el costo por gramo de los lotes sale de esta tabla de precios */
+      try {
+        var pr = leer('dm_ar_precios', {});
+        Object.keys(costos).forEach(function (id) { if (costos[id] > 0) pr[id] = costos[id]; });
+        escribir('dm_ar_precios', pr);
+      } catch (e) {}
+      try { if (typeof inv_render === 'function') inv_render(); } catch (e) {}
+      try { if (typeof inv_renderHistorial === 'function') inv_renderHistorial(); } catch (e) {}
+      try { if (typeof inv_renderAlertas === 'function') inv_renderAlertas(); } catch (e) {}
+    }
+
+    if (typeof cerrarModal === 'function') cerrarModal();
+    var msg = cambios
+      ? '✅ Inventario guardado: ' + cambios + ' insumo(s) ajustado(s)' +
+        (tocados ? ' y ' + tocados + ' costo(s) actualizado(s)' : '') + '.'
+      : (tocados ? '✅ Costos actualizados. Las cantidades no cambiaron.'
+                 : 'No cambiaste nada.');
+    if (typeof toast === 'function') toast(msg, cambios || tocados ? 'ok' : 'warn');
+    else alert(msg);
+  }
+
+  /* Resumen para el panel: cuántos insumos tienen existencia registrada. */
+  function resumen() {
+    function conta(items) {
+      return items.filter(function (i) { return i.cant !== 0; }).length;
+    }
+    return {
+      obleas: { total: lista('obleas').length, con: conta(lista('obleas')) },
+      arequipe: { total: lista('arequipe').length, con: conta(lista('arequipe')) }
+    };
+  }
+
+  function pintar() {
+    var el = document.getElementById('dm-apertura-estado');
+    if (!el) return;
+    var r = resumen();
+    el.innerHTML =
+      'Obleas: <strong>' + r.obleas.con + '</strong> de ' + r.obleas.total +
+      ' insumos con existencia · Arequipe: <strong>' + r.arequipe.con + '</strong> de ' +
+      r.arequipe.total + '.';
+  }
+
+  return { abrir: abrir, guardar: guardar, verFila: verFila, lista: lista,
+           resumen: resumen, pintar: pintar };
+})();
+
+</script>
+<script>
 /* ===== HERRAMIENTAS AVANZADAS ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMAvanzadas — Recoge las herramientas de diagnóstico y las guarda en una
@@ -13518,6 +13819,18 @@ var DMDemo = (function () {
     <div class="dm-nota">
       El préstamo sale de caja o banco y queda registrado en Finanzas.
       La deuda se descuenta sola de la próxima nómina de esa persona.
+    </div>
+
+    <label>Inventario de insumos en bodega</label>
+    <div class="dm-nota" id="dm-apertura-estado">Calculando…</div>
+    <div class="dm-row">
+      <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('obleas')">🧇 Contar obleas</button>
+      <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('arequipe')">🍯 Contar arequipe</button>
+    </div>
+    <div class="dm-nota">
+      Los lista todos juntos con lo que la app cree que hay. Escribes lo que
+      contaste y guardas una sola vez. Es un <strong>conteo</strong>, no una
+      compra: no mueve la plata.
     </div>
 
     <label>Con qué entra el negocio</label>
