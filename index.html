@@ -1585,7 +1585,7 @@ body{
       <div style="background:var(--crema);border-radius:10px;padding:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-weight:700;font-size:.88rem;color:var(--cafe)">🏁 Inventario inicial</div>
-          <div style="font-size:.75rem;color:var(--gris);margin-top:2px">Carga el inventario inicial de Dulce María (corte 16 jun 2025) con todos los insumos y empaques.</div>
+          <div style="font-size:.75rem;color:var(--gris);margin-top:2px">Carga el inventario inicial de Dulce María (corte 1 ago 2026) con todos los insumos y empaques.</div>
         </div>
         <button class="btn btn-ghost" onclick="inv_cargarInventarioInicial()" style="white-space:nowrap;flex-shrink:0">🏁 Cargar</button>
       </div>
@@ -13573,6 +13573,707 @@ var DMDeshacer = (function () {
 
 </script>
 <script>
+/* ===== BODEGA: LAS DOS LINEAS EN UNA PANTALLA ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMBodega — una sola pantalla para toda la bodega.
+
+   El problema: los insumos de obleas y los de arequipe viven en dos módulos
+   distintos, con dos catálogos distintos y dos pantallas distintas. Para
+   saber «qué hay en bodega» o «qué está por acabarse» hay que entrar a dos
+   sitios y sumar de cabeza. Para registrar una compra, hay que acordarse de
+   en cuál de los dos módulos vive ese insumo.
+
+   Esta pantalla los muestra juntos: todo el stock, su costo, su valor, y en
+   rojo lo que está por debajo del mínimo. Y deja registrar una compra sin
+   preguntar de qué línea es — el insumo ya sabe a cuál pertenece.
+
+   POR QUÉ NO SE FUSIONAN LOS DOS ALMACENES
+   Tony confirmó que la harina de obleas y las harinas de arequipe son
+   productos distintos: no hay un solo insumo que las dos líneas compartan
+   físicamente. Fusionar los almacenes sería convertir unidades (kg contra
+   gramos), reescribir el costeo de las dos líneas y migrar el histórico de
+   movimientos, con riesgo de dañar números que hoy están bien — todo para
+   unificar cero insumos reales. Así que cada línea sigue guardando lo suyo,
+   con la misma forma de siempre, y lo que se unifica es la VISTA.
+
+   Consecuencia práctica: esta pantalla no inventa un almacén nuevo. Escribe
+   exactamente donde escriben las pantallas originales, con la misma forma de
+   movimiento. Lo que registres aquí se ve allá, y al revés.
+
+   LA COMPRA SE PIDE POR VALOR TOTAL
+   Las dos pantallas originales no coincidían: obleas pedía el costo TOTAL de
+   la compra y arequipe el costo POR UNIDAD. Eso se presta para meter un dato
+   por el otro y dañar el costo promedio. Aquí siempre se pide lo que dice la
+   factura del proveedor — cuánto pagaste en total — y el costo unitario se
+   calcula y se muestra antes de guardar.
+
+   LA PLATA
+   Ni la pantalla de obleas ni la de arequipe registran hoy el egreso en
+   Finanzas: la compra mueve stock, no plata. Aquí se mantiene igual por
+   defecto, pero hay una casilla para registrar también la salida de caja o
+   banco, porque casi siempre esa plata sí salió.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMBodega = (function () {
+  'use strict';
+
+  function esc4(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function leer(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+  function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function pesos(v) { return '$' + Math.round(num(v)).toLocaleString('es-CO'); }
+
+  /* En el celular del encargado, Finanzas no existe. Ofrecerle registrar la
+     salida de plata ahi seria escribir en una pantalla que el no puede abrir. */
+  function veFinanzas() {
+    var p = (typeof window !== 'undefined' && window.DM_PERFIL) || null;
+    if (!p || !p.ocultar) return true;
+    return p.ocultar.indexOf('utilidad') < 0;
+  }
+  function hoy() { return new Date().toISOString().slice(0, 10); }
+  function redondo(v) { return Math.round(num(v) * 1000) / 1000; }
+
+  /* ── El inventario de las dos líneas, en una sola lista ──────────────── */
+  /* Se apoya en DMApertura.lista(), que ya sabe leer los dos catálogos, y le
+     agrega el mínimo y la línea a la que pertenece cada insumo. */
+  function todo() {
+    if (!window.DMApertura || typeof DMApertura.lista !== 'function') return [];
+    var out = [];
+    var invOb = leer('obleas_inventario', {});
+    DMApertura.lista('obleas').forEach(function (it) {
+      var s = invOb[it.id] || {};
+      var min = num(s.stockMin);
+      if (!min && typeof INSUMOS_CAT !== 'undefined' && INSUMOS_CAT[it.id]) {
+        min = num(INSUMOS_CAT[it.id].stockMin);
+      }
+      out.push({ id: it.id, nombre: it.nombre, unidad: it.unidad, cant: num(it.cant),
+                 costo: num(it.costo), minimo: min, linea: 'obleas', grupo: 'Obleas' });
+    });
+    var invAr = leer('dm_ar_inv', {});
+    DMApertura.lista('arequipe').forEach(function (it) {
+      var s = invAr[it.id] || {};
+      out.push({ id: it.id, nombre: it.nombre, unidad: it.unidad, cant: num(it.cant),
+                 costo: num(it.costo), minimo: num(s.minimo), linea: 'arequipe',
+                 grupo: 'Arequipe · ' + it.grupo });
+    });
+    return out;
+  }
+
+  function porId(linea, id) {
+    var t = todo();
+    for (var i = 0; i < t.length; i++) {
+      if (t[i].linea === linea && t[i].id === id) return t[i];
+    }
+    return null;
+  }
+
+  /* Un insumo está en alerta si tiene mínimo y el stock no llega, o si el
+     stock quedó negativo (se consumió algo que no estaba registrado). */
+  function enAlerta(it) {
+    if (it.cant < 0) return true;
+    return it.minimo > 0 && it.cant < it.minimo;
+  }
+
+  function resumen() {
+    var t = todo(), valor = 0, alertas = 0, negativos = 0;
+    t.forEach(function (it) {
+      valor += it.cant * it.costo;
+      if (it.cant < 0) negativos++;
+      if (enAlerta(it)) alertas++;
+    });
+    return { items: t.length, valor: valor, alertas: alertas, negativos: negativos };
+  }
+
+  /* ── La pantalla ─────────────────────────────────────────────────────── */
+  function filaHTML(it) {
+    var valor = it.cant * it.costo;
+    var alerta = enAlerta(it);
+    var color = it.cant < 0 ? '#B03020' : (alerta ? '#B07A20' : 'var(--gris)');
+    var aviso = it.cant < 0 ? ' · en negativo'
+              : (alerta ? ' · bajo el mínimo (' + redondo(it.minimo) + ')' : '');
+    return '' +
+      '<div class="dmb-fila" data-buscar="' + esc4(it.nombre.toLowerCase()) + '" ' +
+      'style="display:flex;gap:8px;align-items:center;padding:6px 0;' +
+      'border-bottom:1px solid var(--crema2)' + (alerta ? ';background:#FFF8EE' : '') + '">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:.82rem;font-weight:600;overflow:hidden;' +
+          'text-overflow:ellipsis;white-space:nowrap">' +
+          (alerta ? '<span style="color:' + color + '">⚠ </span>' : '') +
+          esc4(it.nombre) + '</div>' +
+          '<div style="font-size:.66rem;color:' + color + '">' +
+          redondo(it.cant) + ' ' + esc4(it.unidad) + ' × ' + pesos(it.costo) +
+          aviso + '</div>' +
+        '</div>' +
+        '<div style="text-align:right;flex-shrink:0">' +
+          '<div style="font-size:.8rem;font-weight:700">' + pesos(valor) + '</div>' +
+          '<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:.66rem;margin-top:2px" ' +
+          'onclick="DMBodega.comprar(\'' + esc4(it.linea) + '\',\'' + esc4(it.id) + '\')">＋ Compra</button>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function abrir(soloAlertas) {
+    if (typeof abrirModal !== 'function') {
+      alert('Abre primero el módulo de Ventas y vuelve a intentar.');
+      return;
+    }
+    var t = todo();
+    if (!t.length) { alert('No se encontraron los catálogos de insumos.'); return; }
+    if (soloAlertas) t = t.filter(enAlerta);
+
+    var r = resumen();
+    var grupo = '', filas = '';
+    t.forEach(function (it) {
+      if (it.grupo !== grupo) {
+        grupo = it.grupo;
+        filas += '<div class="dmb-tit" style="margin:12px 0 4px;font-size:.72rem;font-weight:700;' +
+                 'text-transform:uppercase;letter-spacing:.4px;color:var(--gris)">' +
+                 esc4(grupo) + '</div>';
+      }
+      filas += filaHTML(it);
+    });
+    if (!filas) filas = '<p style="font-size:.82rem;color:var(--gris);padding:14px 0">' +
+                        'Nada por debajo del mínimo. Todo en orden.</p>';
+
+    abrirModal(
+      '<h3>🏬 Bodega</h3>' +
+      '<div style="display:flex;gap:8px;margin:2px 0 8px">' +
+        '<div style="flex:1;background:var(--crema);border-radius:9px;padding:7px 9px">' +
+          '<div style="font-size:.62rem;color:var(--gris);text-transform:uppercase;' +
+          'letter-spacing:.4px">Valor en bodega</div>' +
+          '<div style="font-size:1rem;font-weight:700">' + pesos(r.valor) + '</div></div>' +
+        '<div style="flex:1;background:' + (r.alertas ? '#FFF3E0' : 'var(--crema)') +
+        ';border-radius:9px;padding:7px 9px">' +
+          '<div style="font-size:.62rem;color:var(--gris);text-transform:uppercase;' +
+          'letter-spacing:.4px">Por comprar</div>' +
+          '<div style="font-size:1rem;font-weight:700' +
+          (r.alertas ? ';color:#B07A20' : '') + '">' + r.alertas + '</div></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+        '<input type="text" id="dmb-buscar" placeholder="Buscar insumo…" ' +
+        'style="flex:1" oninput="DMBodega.filtrar(this.value)">' +
+        '<button class="btn btn-ghost btn-sm" style="flex-shrink:0" ' +
+        'onclick="DMBodega.abrir(' + (soloAlertas ? 'false' : 'true') + ')">' +
+        (soloAlertas ? 'Ver todo' : '⚠ Solo alertas') + '</button>' +
+      '</div>' +
+      '<div id="dmb-lista" style="max-height:48vh;overflow-y:auto">' + filas + '</div>' +
+      '<div class="btn-row" style="margin-top:8px">' +
+        '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cerrar</button>' +
+      '</div>' +
+      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+      'Las dos líneas juntas. Cada insumo sigue guardándose en su módulo, así que ' +
+      'lo que registres aquí se ve igual en Obleas o en Arequipe.' +
+      (r.negativos ? '<br><br><strong>' + r.negativos + ' insumo(s) en negativo</strong>: ' +
+       'se consumió algo que nunca se registró como compra. Regístralo y se corrige.' : '') +
+      '</div>');
+  }
+
+  function filtrar(texto) {
+    var q = String(texto || '').trim().toLowerCase();
+    var cont = document.getElementById('dmb-lista');
+    if (!cont) return;
+    Array.prototype.forEach.call(cont.querySelectorAll('.dmb-fila'), function (f) {
+      var n = f.getAttribute('data-buscar') || '';
+      f.style.display = (!q || n.indexOf(q) >= 0) ? '' : 'none';
+    });
+    /* los títulos de grupo se esconden si no les quedó ninguna fila visible */
+    Array.prototype.forEach.call(cont.querySelectorAll('.dmb-tit'), function (t) {
+      var visible = false, n = t.nextSibling;
+      while (n && !(n.className && String(n.className).indexOf('dmb-tit') >= 0)) {
+        if (n.className && String(n.className).indexOf('dmb-fila') >= 0 && n.style.display !== 'none') {
+          visible = true; break;
+        }
+        n = n.nextSibling;
+      }
+      t.style.display = visible ? '' : 'none';
+    });
+  }
+
+  /* ── Registrar una compra ────────────────────────────────────────────── */
+  function comprar(linea, id) {
+    var it = porId(linea, id);
+    if (!it) { alert('No se encontró ese insumo.'); return; }
+    abrirModal(
+      '<h3>🧾 Compra de ' + esc4(it.nombre) + '</h3>' +
+      '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">' +
+      'Hay <strong>' + redondo(it.cant) + ' ' + esc4(it.unidad) + '</strong> a ' +
+      pesos(it.costo) + ' por ' + esc4(it.unidad) + '.</p>' +
+      '<div style="display:flex;gap:8px">' +
+        '<div style="flex:1"><label>Cantidad (' + esc4(it.unidad) + ')</label>' +
+        '<input type="number" step="any" min="0" id="dmb-cant" placeholder="0" ' +
+        'oninput="DMBodega.previa()"></div>' +
+        '<div style="flex:1"><label>Pagaste en total</label>' +
+        '<input type="number" step="any" min="0" id="dmb-total" placeholder="0" ' +
+        'oninput="DMBodega.previa()"></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:8px">' +
+        '<div style="flex:1"><label>Fecha</label>' +
+        '<input type="date" id="dmb-fecha" value="' + hoy() + '"></div>' +
+        '<div style="flex:1.2"><label>Proveedor</label>' +
+        '<input type="text" id="dmb-prov" placeholder="Opcional"></div>' +
+      '</div>' +
+      '<div id="dmb-previa" style="margin-top:8px;font-size:.78rem;min-height:18px;' +
+      'color:var(--gris)"></div>' +
+      (veFinanzas() ?
+        '<label style="display:flex;gap:7px;align-items:flex-start;margin-top:8px;' +
+        'font-size:.78rem;cursor:pointer">' +
+          '<input type="checkbox" id="dmb-fin" style="width:auto;margin-top:2px" ' +
+          'onchange="DMBodega.verCuenta()">' +
+          '<span>Registrar también la salida de plata en Finanzas</span></label>' +
+        '<div id="dmb-cuenta" style="display:none;margin-top:6px">' +
+          '<label>Sale de</label>' +
+          '<select id="dmb-medio"><option value="caja">Caja</option>' +
+          '<option value="bancos">Banco</option></select></div>' : '') +
+      '<div class="btn-row" style="margin-top:10px">' +
+        '<button class="btn btn-primary btn-sm" ' +
+        'onclick="DMBodega.confirmar(\'' + esc4(linea) + '\',\'' + esc4(id) + '\')">' +
+        '💾 Registrar compra</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="DMBodega.abrir(false)">Volver</button>' +
+      '</div>');
+  }
+
+  function verCuenta() {
+    var c = document.getElementById('dmb-cuenta');
+    var f = document.getElementById('dmb-fin');
+    if (c && f) c.style.display = f.checked ? '' : 'none';
+  }
+
+  function previa() {
+    var caja = document.getElementById('dmb-previa');
+    if (!caja) return;
+    var cant = num((document.getElementById('dmb-cant') || {}).value);
+    var total = num((document.getElementById('dmb-total') || {}).value);
+    if (cant <= 0 || total <= 0) { caja.innerHTML = ''; return; }
+    caja.innerHTML = 'Sale a <strong>' + pesos(total / cant) + '</strong> por unidad.';
+  }
+
+  function confirmar(linea, id) {
+    var it = porId(linea, id);
+    if (!it) { alert('No se encontró ese insumo.'); return; }
+    var cant = num((document.getElementById('dmb-cant') || {}).value);
+    var total = num((document.getElementById('dmb-total') || {}).value);
+    var fecha = (document.getElementById('dmb-fecha') || {}).value || hoy();
+    var prov = String((document.getElementById('dmb-prov') || {}).value || '').trim();
+    var aFin = veFinanzas() && !!(document.getElementById('dmb-fin') || {}).checked;
+    var medio = (document.getElementById('dmb-medio') || {}).value || 'caja';
+
+    if (cant <= 0) { alert('Escribe cuánto compraste.'); return; }
+    if (total <= 0) { alert('Escribe cuánto pagaste.'); return; }
+    var cu = total / cant;
+
+    var queda;
+    if (linea === 'obleas') {
+      var inv = leer('obleas_inventario', {});
+      var s = inv[id] || { stock: 0, costoPromedio: 0, stockMin: it.minimo };
+      var antes = num(s.stock), cAntes = num(s.costoPromedio);
+      /* Con stock negativo el promedio ponderado da un número sin sentido:
+         la compra primero tapa el hueco y el costo pasa a ser el de hoy. */
+      var nuevo = antes + cant;
+      s.costoPromedio = (antes < 0 || nuevo <= 0) ? cu
+                      : (antes * cAntes + cant * cu) / nuevo;
+      s.stock = nuevo;
+      if (!s.stockMin) s.stockMin = it.minimo;
+      inv[id] = s;
+      escribir('obleas_inventario', inv);
+      var movs = leer('obleas_inv_movimientos', []);
+      movs.push({
+        ts: new Date().toISOString(), fecha: fecha, tipo: 'entrada', insumo: id,
+        cantidad: cant, costoUnitario: cu, costoTotal: total,
+        proveedor: prov, stockResultante: nuevo
+      });
+      escribir('obleas_inv_movimientos', movs);
+      queda = nuevo;
+      try { if (typeof renderInvStock === 'function') renderInvStock(); } catch (e) {}
+      try { if (typeof renderComprasRecientes === 'function') renderComprasRecientes(); } catch (e) {}
+    } else {
+      var st = leer('dm_ar_inv', {});
+      var a = st[id] || { cantActual: 0, costoPromedio: 0, minimo: 0 };
+      var antesA = num(a.cantActual), cAntesA = num(a.costoPromedio);
+      var nuevoA = antesA + cant;
+      a.costoPromedio = (antesA < 0 || nuevoA <= 0) ? cu
+                      : (antesA * cAntesA + cant * cu) / nuevoA;
+      a.cantActual = nuevoA;
+      st[id] = a;
+      escribir('dm_ar_inv', st);
+      var mov = leer('dm_ar_mov', []);
+      mov.unshift({
+        id: Date.now() + '_' + id, fecha: fecha, ins_id: id, tipo: 'compra',
+        cant: cant, costoUnit: cu, costoPromDespues: a.costoPromedio,
+        prov: prov, ref: 'Compra'
+      });
+      escribir('dm_ar_mov', mov);
+      /* el costo por gramo de los lotes sale de esta tabla */
+      var pr = leer('dm_ar_precios', {});
+      pr[id] = a.costoPromedio;
+      escribir('dm_ar_precios', pr);
+      queda = nuevoA;
+      try { if (typeof inv_render === 'function') inv_render(); } catch (e) {}
+      try { if (typeof inv_renderHistorial === 'function') inv_renderHistorial(); } catch (e) {}
+      try { if (typeof inv_renderAlertas === 'function') inv_renderAlertas(); } catch (e) {}
+    }
+
+    var msg = '✅ Compra registrada: ' + redondo(cant) + ' ' + it.unidad + ' de ' +
+              it.nombre + '. Quedan ' + redondo(queda) + '.';
+
+    if (aFin) {
+      registrarEgreso(medio, total, it.nombre, prov, fecha)
+        .then(function (ok) {
+          cerrar(msg + (ok ? ' Salida de ' + (medio === 'caja' ? 'caja' : 'banco') +
+                             ' registrada.' : ''));
+          if (!ok) alert('El stock quedó registrado, pero la salida de plata no se pudo ' +
+                         'guardar. Anótala a mano en Finanzas.');
+        });
+      return;
+    }
+    cerrar(msg);
+  }
+
+  function cerrar(msg) {
+    if (typeof cerrarModal === 'function') cerrarModal();
+    if (typeof toast === 'function') toast(msg, 'ok'); else alert(msg);
+    try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {}
+    pintar();
+  }
+
+  /* La compra de insumos es costo de producción, no gasto de operación. */
+  function registrarEgreso(medio, monto, nombre, prov, fecha) {
+    if (typeof dbPut !== 'function' || typeof STORE_FINANZAS === 'undefined') {
+      return Promise.resolve(false);
+    }
+    return dbPut(STORE_FINANZAS, {
+      id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
+      cuenta: medio === 'bancos' ? 'bancos' : 'caja',
+      tipo: 'egreso', clase: 'produccion',
+      categoria: 'Insumos', rubro: 'Compra de insumos', producto: nombre,
+      monto: monto, fecha: fecha, facturaId: null,
+      banco: medio === 'bancos' ? '' : null,
+      ref: 'Compra de ' + nombre + (prov ? ' · ' + prov : ''),
+      cliente: null, ts: Date.now()
+    }).then(function () { return true; })
+      .catch(function (e) { console.warn('registrarEgreso:', e); return false; });
+  }
+
+  /* ── Resumen en el panel de ajustes ──────────────────────────────────── */
+  function pintar() {
+    var el = document.getElementById('dm-bodega-estado');
+    if (!el) return;
+    var r = resumen();
+    if (!r.items) { el.innerHTML = 'Calculando…'; return; }
+    el.innerHTML = 'Valor en bodega: <strong>' + pesos(r.valor) + '</strong> en ' +
+      r.items + ' insumos.' +
+      (r.alertas ? ' <span style="color:#B07A20"><strong>' + r.alertas +
+                   '</strong> por debajo del mínimo.</span>' : ' Ninguno bajo el mínimo.');
+  }
+
+  function arrancar(intentos) {
+    intentos = intentos || 0;
+    if (window.DMApertura && typeof DMApertura.lista === 'function') { pintar(); return; }
+    if (intentos > 60) return;
+    setTimeout(function () { arrancar(intentos + 1); }, 200);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
+  } else { arrancar(0); }
+
+  return { abrir: abrir, todo: todo, resumen: resumen, filtrar: filtrar,
+           comprar: comprar, previa: previa, verCuenta: verCuenta,
+           confirmar: confirmar, enAlerta: enAlerta, pintar: pintar,
+           veFinanzas: veFinanzas };
+})();
+
+</script>
+<script>
+/* ===== LISTA DE TRABAJADORES EDITABLE ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMTrabajadores — la lista de la gente deja de estar escrita en el código.
+
+   Hasta ahora los 8 trabajadores estaban fijos dentro de obleas.html:
+
+       var WORKERS = [ {nombre:'Yasir', rol:'Maquinero', maq:1}, ... ];
+
+   Entra alguien nuevo, se va otro, o alguien cambia de máquina, y hay que
+   reconstruir la app. Eso no puede depender de mí.
+
+   Ahora la lista se guarda en el celular (`obleas_trabajadores`). Si no hay
+   nada guardado, se usa la del código como punto de partida — nadie pierde
+   nada al actualizar.
+
+   POR QUÉ SE MODIFICA EL ARREGLO EN SU SITIO, EN VEZ DE REEMPLAZARLO
+   El módulo de obleas guarda `WORKERS` en 8 lugares distintos y algunos lo
+   capturan al arrancar. Si yo hiciera `WORKERS = otra_cosa`, las funciones
+   que ya tenían el arreglo viejo seguirían viéndolo. Por eso se vacía y se
+   vuelve a llenar el MISMO arreglo (`length = 0` y `push`): todo el que lo
+   tenga referenciado ve el cambio.
+
+   LO QUE NO SE TOCA
+   El pago sale de `getWorkerPago`, que lo decide por rol + máquina contra la
+   configuración de tarifas. Un trabajador nuevo con rol y máquina conocidos
+   cobra bien sin tocar nada más. Por eso el rol y la máquina se escogen de
+   una lista y no se escriben a mano: un «maquinsta» mal escrito cobraría $0.
+
+   BORRAR A ALGUIEN NO BORRA SU HISTORIA
+   Los turnos ya registrados guardan el nombre del operario, no un vínculo a
+   esta lista. Si sacas a alguien que tiene turnos en el período que estás
+   liquidando, la app avisa antes: sus turnos dejarían de sumar en la nómina.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMTrabajadores = (function () {
+  'use strict';
+
+  var K = 'obleas_trabajadores';
+  var ROLES = ['Maquinero', 'Masero', 'Cortadora'];
+  var MAQUINAS = [1, 2, 3];
+
+  function esc3(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function leer(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+  function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  /* Deja una fila en forma: nombre limpio, rol y máquina válidos. */
+  function sanear(w) {
+    var nombre = String((w && w.nombre) || '').trim();
+    if (!nombre) return null;
+    var rol = ROLES.indexOf(w.rol) >= 0 ? w.rol : ROLES[0];
+    var maq = Number(w.maq);
+    if (MAQUINAS.indexOf(maq) < 0) maq = 1;
+    return { nombre: nombre, rol: rol, maq: maq };
+  }
+
+  /* La lista del código, tal como venía. Es el punto de partida. */
+  function porDefecto() {
+    if (typeof WORKERS === 'undefined' || !WORKERS.length) return [];
+    return WORKERS.map(function (w) { return { nombre: w.nombre, rol: w.rol, maq: w.maq }; });
+  }
+
+  function guardados() {
+    var v = leer(K, null);
+    if (!v || !v.length) return null;
+    var out = [];
+    v.forEach(function (w) { var s = sanear(w); if (s) out.push(s); });
+    return out.length ? out : null;
+  }
+
+  function lista() { return guardados() || porDefecto(); }
+
+  /* ── Volcar la lista dentro del arreglo que usa el módulo de obleas ───── */
+  function aplicar() {
+    if (typeof WORKERS === 'undefined') return 0;
+    var l = guardados();
+    if (!l) return 0;                       /* nada guardado: se deja el código */
+    WORKERS.length = 0;
+    l.forEach(function (w) { WORKERS.push(w); });
+    return WORKERS.length;
+  }
+
+  /* ── Cuántos turnos tiene cada persona (para avisar antes de borrar) ──── */
+  function turnosPorNombre() {
+    var cuenta = {};
+    if (typeof getTurnos !== 'function') return cuenta;
+    var arr = [];
+    try { arr = getTurnos() || []; } catch (e) { return cuenta; }
+    arr.forEach(function (r) {
+      ['op1', 'op2', 'op3', 'op4', 'op5', 'op6', 'op7', 'op8'].forEach(function (c) {
+        var v = r && r[c];
+        if (!v) return;
+        var n = String(v).trim().toLowerCase();
+        if (n) cuenta[n] = (cuenta[n] || 0) + 1;
+      });
+    });
+    return cuenta;
+  }
+
+  function turnosDe(nombre) {
+    var c = turnosPorNombre();
+    var n = String(nombre || '').trim().toLowerCase();
+    var total = 0;
+    Object.keys(c).forEach(function (k) {
+      if (k === n || k.indexOf(n) === 0 || n.indexOf(k) === 0) total += c[k];
+    });
+    return total;
+  }
+
+  /* ── La pantalla ─────────────────────────────────────────────────────── */
+  function fila(w, i) {
+    var t = turnosDe(w.nombre);
+    var ops = ROLES.map(function (r) {
+      return '<option' + (r === w.rol ? ' selected' : '') + '>' + r + '</option>';
+    }).join('');
+    var maqs = MAQUINAS.map(function (m) {
+      return '<option value="' + m + '"' + (m === w.maq ? ' selected' : '') + '>Máquina ' + m + '</option>';
+    }).join('');
+    return '' +
+      '<div class="dmt-fila" data-i="' + i + '" style="display:flex;gap:5px;align-items:center;' +
+      'padding:6px 0;border-bottom:1px solid var(--crema2)">' +
+        '<div style="flex:1.3;min-width:0">' +
+          '<input type="text" class="dmt-nombre" value="' + esc3(w.nombre) + '" ' +
+          'placeholder="Nombre" style="width:100%">' +
+          (t ? '<div style="font-size:.62rem;color:var(--gris);margin-top:2px">' +
+               t + ' turno(s) registrado(s)</div>' : '') +
+        '</div>' +
+        '<select class="dmt-rol" style="flex:1;min-width:0">' + ops + '</select>' +
+        '<select class="dmt-maq" style="width:104px;flex-shrink:0">' + maqs + '</select>' +
+        '<button class="btn btn-ghost btn-sm dmt-quitar" style="flex-shrink:0;padding:4px 8px" ' +
+        'onclick="DMTrabajadores.quitar(this)" title="Quitar">✕</button>' +
+      '</div>';
+  }
+
+  function abrir() {
+    if (typeof abrirModal !== 'function') {
+      alert('Abre primero el módulo de Ventas y vuelve a intentar.');
+      return;
+    }
+    var l = lista();
+    abrirModal(
+      '<h3>👷 Trabajadores de producción</h3>' +
+      '<p style="font-size:.8rem;color:var(--gris);margin-bottom:6px">' +
+      'Quien esté en esta lista entra en la nómina. El pago sale del <strong>rol y ' +
+      'la máquina</strong> según las tarifas que tengas configuradas.</p>' +
+      '<div style="display:flex;gap:5px;font-size:.62rem;color:var(--gris);' +
+      'text-transform:uppercase;letter-spacing:.4px;padding-bottom:3px">' +
+        '<div style="flex:1.3">Nombre</div><div style="flex:1">Rol</div>' +
+        '<div style="width:104px">Máquina</div><div style="width:30px"></div></div>' +
+      '<div id="dmt-lista" style="max-height:46vh;overflow-y:auto">' +
+        l.map(fila).join('') +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:8px">' +
+        '<button class="btn btn-ghost btn-sm" onclick="DMTrabajadores.agregar()">＋ Agregar persona</button>' +
+      '</div>' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary btn-sm" onclick="DMTrabajadores.guardar()">💾 Guardar lista</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button>' +
+      '</div>' +
+      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+      'Quitar a alguien <strong>no borra sus turnos</strong>: quedan guardados con su ' +
+      'nombre. Lo que pasa es que dejan de sumar en la nómina. Si tiene turnos sin ' +
+      'pagar, págale primero y después quítalo.' +
+      '<br><br><button class="btn btn-ghost btn-sm" style="padding:4px 9px" ' +
+      'onclick="DMTrabajadores.restaurar()">↺ Volver a la lista original</button></div>');
+  }
+
+  function agregar() {
+    var cont = document.getElementById('dmt-lista');
+    if (!cont) return;
+    var i = cont.querySelectorAll('.dmt-fila').length;
+    var div = document.createElement('div');
+    div.innerHTML = fila({ nombre: '', rol: ROLES[0], maq: 1 }, i);
+    var nueva = div.firstChild;
+    cont.appendChild(nueva);
+    cont.scrollTop = cont.scrollHeight;
+    var inp = nueva.querySelector('.dmt-nombre');
+    if (inp) inp.focus();
+  }
+
+  function quitar(boton) {
+    var f = boton.parentNode;
+    var inp = f.querySelector('.dmt-nombre');
+    var nombre = inp ? inp.value.trim() : '';
+    if (nombre) {
+      var t = turnosDe(nombre);
+      if (t > 0 && !confirm('«' + nombre + '» tiene ' + t + ' turno(s) registrado(s).\n\n' +
+                            'Los turnos NO se borran, pero dejará de aparecer en la nómina. ' +
+                            '¿Quitarlo de la lista?')) return;
+    }
+    f.parentNode.removeChild(f);
+  }
+
+  function leerPantalla() {
+    var out = [], vistos = {}, repetido = null;
+    var filas = document.querySelectorAll('#dmt-lista .dmt-fila');
+    Array.prototype.forEach.call(filas, function (f) {
+      var nombre = (f.querySelector('.dmt-nombre') || {}).value || '';
+      var rol = (f.querySelector('.dmt-rol') || {}).value || ROLES[0];
+      var maq = Number((f.querySelector('.dmt-maq') || {}).value || 1);
+      var s = sanear({ nombre: nombre, rol: rol, maq: maq });
+      if (!s) return;                                   /* fila en blanco: se ignora */
+      var k = s.nombre.toLowerCase();
+      if (vistos[k]) { repetido = s.nombre; return; }
+      vistos[k] = 1;
+      out.push(s);
+    });
+    return { lista: out, repetido: repetido };
+  }
+
+  function guardar() {
+    var r = leerPantalla();
+    if (r.repetido) {
+      alert('Hay dos personas llamadas «' + r.repetido + '».\n\n' +
+            'La nómina identifica a la gente por el nombre, así que tienen que ser ' +
+            'distintos. Ponle el apellido a uno de los dos.');
+      return;
+    }
+    if (!r.lista.length) {
+      alert('La lista quedó vacía. Deja al menos una persona, o usa «Volver a la ' +
+            'lista original».');
+      return;
+    }
+    escribir(K, r.lista);
+    aplicar();
+    if (typeof cerrarModal === 'function') cerrarModal();
+    var msg = '✅ Lista guardada: ' + r.lista.length + ' persona(s) en nómina.';
+    if (typeof toast === 'function') toast(msg, 'ok'); else alert(msg);
+    refrescar();
+  }
+
+  function restaurar() {
+    if (!confirm('¿Volver a la lista que trae la app?\n\nSe pierden los cambios que ' +
+                 'hayas hecho a los nombres, roles y máquinas.')) return;
+    try { localStorage.removeItem(K); } catch (e) {}
+    if (typeof cerrarModal === 'function') cerrarModal();
+    var msg = 'Lista restaurada. Recarga la app para verla.';
+    if (typeof toast === 'function') toast(msg, 'ok'); else alert(msg);
+  }
+
+  function refrescar() {
+    try { if (typeof calcBonosTotal === 'function') calcBonosTotal(); } catch (e) {}
+    try { if (typeof renderPrestEmpleados === 'function') renderPrestEmpleados(); } catch (e) {}
+    try { if (window.DMPrestamos && DMPrestamos.pintar) DMPrestamos.pintar(); } catch (e) {}
+    pintar();
+  }
+
+  function pintar() {
+    var el = document.getElementById('dm-trab-estado');
+    if (!el) return;
+    var l = lista();
+    var porMaq = {};
+    l.forEach(function (w) { porMaq[w.maq] = (porMaq[w.maq] || 0) + 1; });
+    var det = MAQUINAS.filter(function (m) { return porMaq[m]; })
+      .map(function (m) { return 'Máq ' + m + ': ' + porMaq[m]; }).join(' · ');
+    el.innerHTML = '<strong>' + l.length + '</strong> persona(s) en nómina' +
+                   (det ? ' — ' + det : '') +
+                   (guardados() ? '' : ' <span style="opacity:.7">(lista original)</span>');
+  }
+
+  /* ── Arranque: aplicar lo guardado apenas exista WORKERS ─────────────── */
+  function arrancar(intentos) {
+    intentos = intentos || 0;
+    if (typeof WORKERS !== 'undefined') { aplicar(); pintar(); return; }
+    if (intentos > 60) return;
+    setTimeout(function () { arrancar(intentos + 1); }, 200);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
+  } else { arrancar(0); }
+
+  return { abrir: abrir, agregar: agregar, quitar: quitar, guardar: guardar,
+           restaurar: restaurar, lista: lista, aplicar: aplicar, pintar: pintar,
+           turnosDe: turnosDe, ROLES: ROLES, MAQUINAS: MAQUINAS };
+})();
+
+</script>
+<script>
 /* ===== HERRAMIENTAS AVANZADAS ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMAvanzadas — Recoge las herramientas de diagnóstico y las guarda en una
@@ -14093,6 +14794,10 @@ var DMDemo = (function () {
     </div>
 
     <label>Nómina de producción</label>
+    <div class="dm-nota" id="dm-trab-estado">Calculando…</div>
+    <div class="dm-row">
+      <button class="dm-btn ghost" onclick="DM.panel(false);DMTrabajadores.abrir()">👷 Trabajadores</button>
+    </div>
     <div id="dm-nomina-cuerpo"><div class="dm-nota">Calculando…</div></div>
     <div class="dm-nota">
       El período arranca el día siguiente al último pago. Al pagar queda el
@@ -14131,7 +14836,19 @@ var DMDemo = (function () {
       La deuda se descuenta sola de la próxima nómina de esa persona.
     </div>
 
-    <label>Inventario de insumos en bodega</label>
+    <label>Bodega</label>
+    <div class="dm-nota" id="dm-bodega-estado">Calculando…</div>
+    <div class="dm-row">
+      <button class="dm-btn prim" onclick="DM.panel(false);DMBodega.abrir(false)">🏬 Ver toda la bodega</button>
+      <button class="dm-btn ghost" onclick="DM.panel(false);DMBodega.abrir(true)">⚠ Por comprar</button>
+    </div>
+    <div class="dm-nota">
+      Los insumos de obleas y de arequipe en una sola lista, con su valor y lo
+      que está por acabarse. Desde ahí registras la compra sin entrar a cada
+      módulo.
+    </div>
+
+    <label>Contar el inventario</label>
     <div class="dm-nota" id="dm-apertura-estado">Calculando…</div>
     <div class="dm-row">
       <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('obleas')">🧇 Contar obleas</button>
