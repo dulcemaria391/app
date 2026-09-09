@@ -125,6 +125,31 @@ body{
   font-size:19px;color:var(--dm-cafe);margin:0 0 4px;
 }
 #dm-panel .dm-sub{font-size:12.5px;color:var(--dm-gris);margin-bottom:16px;line-height:1.6}
+
+/* Los tres bloques plegables del panel. Antes eran trece secciones seguidas
+   en una sola columna: habia que bajar mucho para llegar a lo de abajo, y la
+   clave de la IA quedaba a la vista apenas se abria. */
+#dm-panel .dm-bloque{
+  border:1px solid var(--dm-crema2, #E8DCC8); border-radius:12px;
+  margin-bottom:10px; background:#fff; overflow:hidden;
+}
+#dm-panel .dm-bloque>summary{
+  list-style:none; cursor:pointer; padding:13px 15px;
+  font-size:14px; font-weight:700; color:var(--dm-cafe, #5A4530);
+  background:var(--dm-crema, #FBF3E6);
+  display:flex; align-items:center; gap:8px; user-select:none;
+}
+#dm-panel .dm-bloque>summary::-webkit-details-marker{display:none}
+#dm-panel .dm-bloque>summary::after{
+  content:'⌄'; margin-left:auto; font-size:17px; line-height:1;
+  transition:transform .18s ease; opacity:.65;
+}
+#dm-panel .dm-bloque[open]>summary::after{transform:rotate(180deg)}
+#dm-panel .dm-bloque[open]>summary{border-bottom:1px solid var(--dm-crema2, #E8DCC8)}
+#dm-panel .dm-bloque>summary:active{background:#F4E9D6}
+#dm-panel .dm-bloque>*:not(summary){padding-left:15px; padding-right:15px}
+#dm-panel .dm-bloque>*:last-child{padding-bottom:14px}
+#dm-panel .dm-bloque>label:first-of-type{margin-top:13px}
 #dm-panel label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;
   letter-spacing:.5px;color:var(--dm-gris);margin:14px 0 5px}
 #dm-panel input[type=password],#dm-panel input[type=text]{
@@ -1634,6 +1659,7 @@ body{
   <button onclick="irA('facturas',this)">🧾 Facturas</button>
   <button onclick="irA('clientes',this)">👥 Clientes</button>
   <button onclick="irA('inventario',this)">📦 Inventario</button>
+  <button onclick="irA('bodega',this)">🏬 Bodega</button>
   <button onclick="irA('reportes',this)">📊 Reportes</button>
   <button onclick="irA('finanzas',this)">💰 Finanzas</button>
   <button onclick="irA('caja',this)">💵 Caja</button>
@@ -1843,6 +1869,8 @@ body{
 </section>
 
 <!-- ===================== REPORTES ===================== -->
+<section id="sec-bodega" class="sec"></section>
+
 <section id="sec-reportes" class="sec">
   <div class="kpi-grid" id="kpi-reportes"></div>
   <div style="margin-bottom:14px"><label>Mostrar</label>
@@ -2103,6 +2131,7 @@ body{
   <button onclick="irA('facturas',this)"><span class="ic">🧾</span>Facturas</button>
   <button onclick="irA('clientes',this)"><span class="ic">👥</span>Clientes</button>
   <button onclick="irA('inventario',this)"><span class="ic">📦</span>Stock</button>
+  <button onclick="irA('bodega',this)"><span class="ic">🏬</span>Bodega</button>
   <button onclick="irA('reportes',this)"><span class="ic">📊</span>Reportes</button>
   <button onclick="irA('finanzas',this)"><span class="ic">💰</span>Finanzas</button>
   <button onclick="irA('caja',this)"><span class="ic">💵</span>Caja</button>
@@ -8306,10 +8335,10 @@ function irA(sec,btn){
   document.querySelectorAll('#mod-ventas nav.top button').forEach(function(b){ b.classList.remove('activo'); });
   document.querySelectorAll('#mod-ventas nav.bottom button').forEach(function(b){ b.classList.remove('activo'); });
   /* marcar activos en ambos navs por el orden */
-  var orden=['inicio','escaneo','facturas','clientes','inventario','reportes','finanzas','caja','gastos','resumen','cierres','config'];
+  var orden=['inicio','escaneo','facturas','clientes','inventario','bodega','reportes','finanzas','caja','gastos','resumen','cierres','config'];
   var idx=orden.indexOf(sec);
   if(idx>=0){ var tb=document.querySelectorAll('#mod-ventas nav.top button')[idx]; if(tb)tb.classList.add('activo');
-    var ordenBot=['inicio','escaneo','facturas','clientes','inventario','reportes','finanzas','caja','gastos','resumen','cierres','config'];
+    var ordenBot=['inicio','escaneo','facturas','clientes','inventario','bodega','reportes','finanzas','caja','gastos','resumen','cierres','config'];
     var ib=ordenBot.indexOf(sec); if(ib>=0){ var bb=document.querySelectorAll('#mod-ventas nav.bottom button')[ib]; if(bb){ bb.classList.add('activo'); if(bb.scrollIntoView)try{bb.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'});}catch(e){} } } }
   window.scrollTo({top:0,behavior:'smooth'});
   /* render bajo demanda */
@@ -13718,16 +13747,13 @@ var DMBodega = (function () {
       '</div>';
   }
 
-  function abrir(soloAlertas) {
-    if (typeof abrirModal !== 'function') {
-      alert('Abre primero el módulo de Ventas y vuelve a intentar.');
-      return;
-    }
+  /* El cuerpo de la pantalla: las tarjetas, el buscador y la lista. Se usa
+     igual en la pestana de Bodega que dentro del modal del panel. */
+  function cuerpo(soloAlertas, enPestana) {
     var t = todo();
-    if (!t.length) { alert('No se encontraron los catálogos de insumos.'); return; }
     if (soloAlertas) t = t.filter(enAlerta);
-
     var r = resumen();
+
     var grupo = '', filas = '';
     t.forEach(function (it) {
       if (it.grupo !== grupo) {
@@ -13741,8 +13767,11 @@ var DMBodega = (function () {
     if (!filas) filas = '<p style="font-size:.82rem;color:var(--gris);padding:14px 0">' +
                         'Nada por debajo del mínimo. Todo en orden.</p>';
 
-    abrirModal(
-      '<h3>🏬 Bodega</h3>' +
+    var volver = enPestana
+      ? 'DMBodega.pestana(' + (soloAlertas ? 'false' : 'true') + ')'
+      : 'DMBodega.abrir(' + (soloAlertas ? 'false' : 'true') + ')';
+
+    return '' +
       '<div style="display:flex;gap:8px;margin:2px 0 8px">' +
         '<div style="flex:1;background:var(--crema);border-radius:9px;padding:7px 9px">' +
           '<div style="font-size:.62rem;color:var(--gris);text-transform:uppercase;' +
@@ -13755,29 +13784,80 @@ var DMBodega = (function () {
           '<div style="font-size:1rem;font-weight:700' +
           (r.alertas ? ';color:#B07A20' : '') + '">' + r.alertas + '</div></div>' +
       '</div>' +
-      '<div style="display:flex;gap:6px;margin-bottom:6px">' +
-        '<input type="text" id="dmb-buscar" placeholder="Buscar insumo…" ' +
-        'style="flex:1" oninput="DMBodega.filtrar(this.value)">' +
-        '<button class="btn btn-ghost btn-sm" style="flex-shrink:0" ' +
-        'onclick="DMBodega.abrir(' + (soloAlertas ? 'false' : 'true') + ')">' +
-        (soloAlertas ? 'Ver todo' : '⚠ Solo alertas') + '</button>' +
+      /* Ojo: aqui NO va un id. La pestana y el modal existen a la vez en el
+         DOM, y con el mismo id getElementById devolvia siempre el primero:
+         escribir en el buscador del modal filtraba la lista de la pestana.
+         Se usa una clase y se filtra dentro del bloque que dispara. */
+      '<div class="dmb-caja" style="display:flex;gap:6px;margin-bottom:6px">' +
+        '<input type="text" class="dmb-buscar" placeholder="Buscar insumo…" ' +
+        'style="flex:1" oninput="DMBodega.filtrar(this)">' +
+        '<button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="' + volver + '">' +
+        (soloAlertas ? 'Ver todo' : '⚠ Solo lo que falta') + '</button>' +
       '</div>' +
-      '<div id="dmb-lista" style="max-height:48vh;overflow-y:auto">' + filas + '</div>' +
+      '<div class="dmb-lista"' +
+      (enPestana ? '' : ' style="max-height:48vh;overflow-y:auto"') + '>' + filas + '</div>' +
+      (r.negativos
+        ? '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+          'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+          '<strong>' + r.negativos + ' insumo(s) en negativo</strong>: se consumió algo que ' +
+          'nunca se registró como compra. Regístralo y se corrige.</div>'
+        : '');
+  }
+
+  /* ¿El usuario esta parado en la pestana de Bodega? */
+  function enPestanaAhora() {
+    var s = document.getElementById('sec-bodega');
+    return !!(s && s.className && s.className.indexOf('activo') >= 0);
+  }
+
+  /* ── La pestana propia, dentro de Ventas ─────────────────────────────── */
+  function pestana(soloAlertas) {
+    var sec = document.getElementById('sec-bodega');
+    if (!sec) return;
+    if (!todo().length) {
+      sec.innerHTML = '<div class="card"><p style="font-size:.82rem;color:var(--gris)">' +
+        'No se encontraron los catálogos de insumos.</p></div>';
+      return;
+    }
+    sec.innerHTML =
+      '<div class="card">' +
+        '<div class="card-header"><h2>🏬 Bodega</h2></div>' +
+        '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">' +
+        'Los insumos de obleas y de arequipe juntos. Desde cada renglón registras ' +
+        'la compra sin entrar a cada módulo.</p>' +
+        cuerpo(!!soloAlertas, true) +
+      '</div>';
+  }
+
+  /* ── El modal, para llegar desde el panel de ajustes ─────────────────── */
+  function abrir(soloAlertas) {
+    if (typeof abrirModal !== 'function') {
+      alert('Abre primero el módulo de Ventas y vuelve a intentar.');
+      return;
+    }
+    if (!todo().length) { alert('No se encontraron los catálogos de insumos.'); return; }
+    abrirModal(
+      '<h3>🏬 Bodega</h3>' +
+      cuerpo(!!soloAlertas, false) +
       '<div class="btn-row" style="margin-top:8px">' +
         '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cerrar</button>' +
-      '</div>' +
-      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
-      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
-      'Las dos líneas juntas. Cada insumo sigue guardándose en su módulo, así que ' +
-      'lo que registres aquí se ve igual en Obleas o en Arequipe.' +
-      (r.negativos ? '<br><br><strong>' + r.negativos + ' insumo(s) en negativo</strong>: ' +
-       'se consumió algo que nunca se registró como compra. Regístralo y se corrige.' : '') +
       '</div>');
   }
 
-  function filtrar(texto) {
-    var q = String(texto || '').trim().toLowerCase();
-    var cont = document.getElementById('dmb-lista');
+  /* Recibe el propio campo de busqueda (o un texto, para poder probarlo) y
+     filtra la lista que le corresponde: la de la pestana o la del modal. */
+  function filtrar(entrada, cual) {
+    var q, cont;
+    if (entrada && entrada.nodeType === 1) {
+      q = String(entrada.value || '').trim().toLowerCase();
+      var caja = entrada.parentNode;                    /* .dmb-caja */
+      cont = caja && caja.parentNode
+        ? caja.parentNode.querySelector('.dmb-lista') : null;
+    } else {
+      q = String(entrada || '').trim().toLowerCase();
+      var todas = document.querySelectorAll('.dmb-lista');
+      cont = cual === 'modal' ? todas[todas.length - 1] : todas[0];
+    }
     if (!cont) return;
     Array.prototype.forEach.call(cont.querySelectorAll('.dmb-fila'), function (f) {
       var n = f.getAttribute('data-buscar') || '';
@@ -13835,7 +13915,7 @@ var DMBodega = (function () {
         '<button class="btn btn-primary btn-sm" ' +
         'onclick="DMBodega.confirmar(\'' + esc4(linea) + '\',\'' + esc4(id) + '\')">' +
         '💾 Registrar compra</button>' +
-        '<button class="btn btn-ghost btn-sm" onclick="DMBodega.abrir(false)">Volver</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="DMBodega.volver()">Volver</button>' +
       '</div>');
   }
 
@@ -13935,10 +14015,20 @@ var DMBodega = (function () {
     cerrar(msg);
   }
 
+  /* Desde la pestana, «Volver» es cerrar el modal; desde el panel, es
+     regresar a la lista que estaba abierta en el modal. */
+  function volver() {
+    if (enPestanaAhora()) {
+      if (typeof cerrarModal === 'function') cerrarModal();
+      pestana(false);
+    } else { abrir(false); }
+  }
+
   function cerrar(msg) {
     if (typeof cerrarModal === 'function') cerrarModal();
     if (typeof toast === 'function') toast(msg, 'ok'); else alert(msg);
     try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {}
+    if (document.getElementById('sec-bodega')) pestana(false);
     pintar();
   }
 
@@ -13972,9 +14062,24 @@ var DMBodega = (function () {
                    '</strong> por debajo del mínimo.</span>' : ' Ninguno bajo el mínimo.');
   }
 
+  /* Que irA('bodega') pinte la pestana. El modulo de Ventas no sabe de ella. */
+  function engancharNavegacion() {
+    if (typeof window.irA !== 'function' || window.irA._dmBodega) return false;
+    var previo = window.irA;
+    var nuevo = function (sec, btn) {
+      var r = previo.apply(this, arguments);
+      if (sec === 'bodega') { try { pestana(false); } catch (e) { console.warn('DMBodega:', e); } }
+      return r;
+    };
+    nuevo._dmBodega = true;
+    window.irA = nuevo;
+    return true;
+  }
+
   function arrancar(intentos) {
     intentos = intentos || 0;
-    if (window.DMApertura && typeof DMApertura.lista === 'function') { pintar(); return; }
+    var listo = window.DMApertura && typeof DMApertura.lista === 'function';
+    if (listo) { engancharNavegacion(); pintar(); return; }
     if (intentos > 60) return;
     setTimeout(function () { arrancar(intentos + 1); }, 200);
   }
@@ -13982,7 +14087,9 @@ var DMBodega = (function () {
     document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
   } else { arrancar(0); }
 
-  return { abrir: abrir, todo: todo, resumen: resumen, filtrar: filtrar,
+  return { abrir: abrir, pestana: pestana, cuerpo: cuerpo, volver: volver,
+           enPestanaAhora: enPestanaAhora, engancharNavegacion: engancharNavegacion,
+           todo: todo, resumen: resumen, filtrar: filtrar,
            comprar: comprar, previa: previa, verCuenta: verCuenta,
            confirmar: confirmar, enAlerta: enAlerta, pintar: pintar,
            veFinanzas: veFinanzas };
@@ -14595,6 +14702,310 @@ var DMAvanzadas = (function () {
 
 </script>
 <script>
+/* ===== PIN DEL BLOQUE DE DATOS ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMSeguridad — un PIN delante de lo que no debe verse de pasada.
+
+   El panel de Ajustes tenía trece bloques en una sola columna, y entre ellos
+   la clave de la IA y el botón que reemplaza toda la información de la
+   empresa. Cualquiera que agarre el celular desbloqueado y toque la rueda
+   dentada llega a las dos en dos segundos.
+
+   ─────────────────────────────────────────────────────────────────────────
+   QUÉ PROTEGE ESTO DE VERDAD, Y QUÉ NO
+
+   Esto es una tranca en un cajón, no una caja fuerte. Todo lo que la app
+   guarda vive en el navegador de ese celular, y quien sepa entrar por las
+   herramientas del navegador lo lee sin pasar por aquí. No se puede fingir
+   otra cosa.
+
+   Lo que sí resuelve, que es el riesgo real de un negocio:
+
+     · que alguien tome el celular desbloqueado y llegue de un toque a la
+       clave de la IA o al respaldo completo;
+     · que un descuido reemplace toda la información con un respaldo viejo;
+     · que en el celular de la calle queden a la vista cosas que no le tocan.
+
+   Por eso el PIN no se guarda escrito: se guarda su HUELLA (SHA-256 con una
+   sal propia de este celular). Quien abra el almacenamiento ve la huella, no
+   el PIN, y con la huella no se entra. Si el navegador no ofrece SHA-256
+   —pasa al abrir el archivo sin servidor— se avisa y no se finge que hay
+   protección donde no la hay.
+
+   ─────────────────────────────────────────────────────────────────────────
+   RESTAURAR SE PROTEGE APARTE
+
+   Restaurar un respaldo REEMPLAZA todo lo registrado. Un «Aceptar» sin leer
+   borra el trabajo de días. Además del PIN, pide escribir la palabra
+   REEMPLAZAR: no se puede hacer por accidente.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMSeguridad = (function () {
+  'use strict';
+
+  var K_HUELLA = 'dm_pin_huella';
+  var K_SAL = 'dm_pin_sal';
+  var abierto = false;              /* desbloqueado en esta sesión */
+
+  function esc6(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function haySubtle() {
+    return !!(window.crypto && window.crypto.subtle && window.crypto.subtle.digest);
+  }
+
+  function sal() {
+    var s = null;
+    try { s = localStorage.getItem(K_SAL); } catch (e) {}
+    if (!s) {
+      s = String(Date.now()) + '.' + Math.random().toString(36).slice(2);
+      try { localStorage.setItem(K_SAL, s); } catch (e) {}
+    }
+    return s;
+  }
+
+  function huella(pin) {
+    if (!haySubtle()) return Promise.resolve(null);
+    var datos = new TextEncoder().encode(sal() + '|' + String(pin));
+    return window.crypto.subtle.digest('SHA-256', datos).then(function (buf) {
+      var b = new Uint8Array(buf), h = '';
+      for (var i = 0; i < b.length; i++) h += ('0' + b[i].toString(16)).slice(-2);
+      return h;
+    });
+  }
+
+  function hayPin() {
+    try { return !!localStorage.getItem(K_HUELLA); } catch (e) { return false; }
+  }
+
+  function desbloqueado() { return abierto || !hayPin(); }
+
+  function comprobar(pin) {
+    if (!hayPin()) return Promise.resolve(true);
+    return huella(pin).then(function (h) {
+      if (!h) return false;
+      var g = null;
+      try { g = localStorage.getItem(K_HUELLA); } catch (e) {}
+      return !!g && h === g;
+    });
+  }
+
+  /* ── Poner, cambiar o quitar el PIN ──────────────────────────────────── */
+  function configurar() {
+    if (typeof abrirModal !== 'function') return;
+    if (!haySubtle()) {
+      alert('Este navegador no ofrece el cifrado que necesita el PIN.\n\n' +
+            'Pasa si abres el archivo directamente en vez de por su dirección web. ' +
+            'Ábrela desde la dirección de GitHub Pages y vuelve a intentar.');
+      return;
+    }
+    var existe = hayPin();
+    abrirModal(
+      '<h3>🔒 ' + (existe ? 'Cambiar el PIN' : 'Poner un PIN') + '</h3>' +
+      '<p style="font-size:.8rem;color:var(--gris);margin-bottom:8px">' +
+      'Con el PIN puesto, la parte de <strong>Datos y este celular</strong> ' +
+      'del panel pide la clave antes de mostrarse. Ahí están la clave de la ' +
+      'IA, el respaldo y la restauración.</p>' +
+      (existe
+        ? '<label>PIN actual</label>' +
+          '<input type="password" id="dmsg-viejo" inputmode="numeric" ' +
+          'autocomplete="off" placeholder="••••">'
+        : '') +
+      '<label>' + (existe ? 'PIN nuevo' : 'PIN') + ' (4 a 8 números)</label>' +
+      '<input type="password" id="dmsg-nuevo" inputmode="numeric" ' +
+      'autocomplete="off" placeholder="••••">' +
+      '<label>Escríbelo otra vez</label>' +
+      '<input type="password" id="dmsg-rep" inputmode="numeric" ' +
+      'autocomplete="off" placeholder="••••">' +
+      '<div class="btn-row" style="margin-top:10px">' +
+        '<button class="btn btn-primary btn-sm" onclick="DMSeguridad.guardarPin()">' +
+        '💾 Guardar</button>' +
+        (existe ? '<button class="btn btn-ghost btn-sm" onclick="DMSeguridad.quitarPin()">' +
+                  'Quitar el PIN</button>' : '') +
+        '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button>' +
+      '</div>' +
+      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+      '<strong>Si olvidas el PIN no hay forma de recuperarlo</strong>, porque no se ' +
+      'guarda escrito en ninguna parte. Tendrías que reinstalar la app y volver a ' +
+      'cargar un respaldo. Descarga uno antes de ponerlo.' +
+      '<br><br>Esto es una tranca, no una caja fuerte: quien sepa manejar las ' +
+      'herramientas del navegador puede leer los datos sin pasar por el PIN. ' +
+      'Sirve para que nadie llegue de un toque a la clave o al respaldo.</div>');
+  }
+
+  function guardarPin() {
+    var viejo = (document.getElementById('dmsg-viejo') || {}).value || '';
+    var nuevo = String((document.getElementById('dmsg-nuevo') || {}).value || '').trim();
+    var rep = String((document.getElementById('dmsg-rep') || {}).value || '').trim();
+
+    if (!/^\d{4,8}$/.test(nuevo)) { alert('El PIN tiene que ser de 4 a 8 números.'); return; }
+    if (nuevo !== rep) { alert('Los dos PIN no coinciden.'); return; }
+
+    comprobar(viejo).then(function (ok) {
+      if (!ok) { alert('El PIN actual no es correcto.'); return; }
+      return huella(nuevo).then(function (h) {
+        if (!h) { alert('No se pudo guardar el PIN en este navegador.'); return; }
+        try { localStorage.setItem(K_HUELLA, h); } catch (e) {}
+        abierto = true;
+        if (typeof cerrarModal === 'function') cerrarModal();
+        if (typeof toast === 'function') toast('🔒 PIN guardado.', 'ok');
+        pintar();
+      });
+    });
+  }
+
+  function quitarPin() {
+    var viejo = (document.getElementById('dmsg-viejo') || {}).value || '';
+    comprobar(viejo).then(function (ok) {
+      if (!ok) { alert('Escribe el PIN actual para poder quitarlo.'); return; }
+      try { localStorage.removeItem(K_HUELLA); } catch (e) {}
+      abierto = true;
+      if (typeof cerrarModal === 'function') cerrarModal();
+      if (typeof toast === 'function') toast('PIN quitado.', 'ok');
+      pintar();
+    });
+  }
+
+  /* ── Pedir el PIN antes de hacer algo ────────────────────────────────── */
+  /* despues: función que corre si el PIN es correcto (o si no hay PIN). */
+  function pedir(motivo, despues) {
+    if (desbloqueado()) { despues(); return; }
+    if (typeof abrirModal !== 'function') { despues(); return; }
+    PENDIENTE = despues;
+    abrirModal(
+      '<h3>🔒 Escribe el PIN</h3>' +
+      '<p style="font-size:.8rem;color:var(--gris);margin-bottom:8px">' +
+      esc6(motivo || 'Esta parte está protegida.') + '</p>' +
+      '<input type="password" id="dmsg-pin" inputmode="numeric" autocomplete="off" ' +
+      'placeholder="••••" onkeydown="if(event.key===\'Enter\')DMSeguridad.confirmarPin()">' +
+      '<div id="dmsg-err" style="font-size:.76rem;color:#B03020;min-height:16px;' +
+      'margin-top:5px"></div>' +
+      '<div class="btn-row">' +
+        '<button class="btn btn-primary btn-sm" onclick="DMSeguridad.confirmarPin()">' +
+        'Entrar</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button>' +
+      '</div>');
+    setTimeout(function () {
+      var i = document.getElementById('dmsg-pin');
+      if (i) i.focus();
+    }, 120);
+  }
+
+  var PENDIENTE = null;
+
+  function confirmarPin() {
+    var pin = (document.getElementById('dmsg-pin') || {}).value || '';
+    comprobar(pin).then(function (ok) {
+      if (!ok) {
+        var e = document.getElementById('dmsg-err');
+        if (e) e.textContent = 'PIN incorrecto.';
+        return;
+      }
+      abierto = true;
+      var f = PENDIENTE; PENDIENTE = null;
+      if (typeof cerrarModal === 'function') cerrarModal();
+      pintar();
+      if (typeof f === 'function') setTimeout(f, 60);
+    });
+  }
+
+  /* Volver a cerrar: al cerrar el panel se pierde el desbloqueo. */
+  function cerrarSesion() { abierto = false; pintar(); }
+
+  /* ── El bloque protegido del panel ───────────────────────────────────── */
+  function pintar() {
+    var caja = document.getElementById('dm-protegido');
+    var aviso = document.getElementById('dm-seguridad-estado');
+    if (aviso) {
+      aviso.innerHTML = hayPin()
+        ? 'Protegido con PIN. ' + (desbloqueado()
+            ? '<strong>Abierto</strong> — se cierra solo al salir del panel.'
+            : 'Toca <strong>Abrir</strong> para ver esta parte.')
+        : '<strong>Sin PIN.</strong> Aquí están la clave de la IA y el respaldo de toda ' +
+          'la empresa: cualquiera que tome el celular desbloqueado llega de un toque.';
+    }
+    if (!caja) return;
+    caja.style.display = desbloqueado() ? '' : 'none';
+    var b = document.getElementById('dm-btn-abrir');
+    if (b) {
+      b.style.display = desbloqueado() ? 'none' : '';
+      b.textContent = '🔓 Abrir';
+    }
+    var c = document.getElementById('dm-btn-cerrar');
+    if (c) c.style.display = (hayPin() && desbloqueado()) ? '' : 'none';
+    var p = document.getElementById('dm-btn-pin');
+    if (p) p.textContent = hayPin() ? '🔒 Cambiar el PIN' : '🔒 Poner un PIN';
+  }
+
+  function abrirBloque() {
+    pedir('El respaldo, la restauración y la clave de la IA están en esta parte.',
+          function () { pintar(); });
+  }
+
+  /* ── Restaurar: pide el PIN y además escribir REEMPLAZAR ─────────────── */
+  function restaurar() {
+    pedir('Restaurar reemplaza toda la información de la empresa.', function () {
+      abrirModal(
+        '<h3>⬆️ Restaurar un respaldo</h3>' +
+        '<div style="background:#FDECEA;border:1px solid #E8B4AE;border-radius:9px;' +
+        'padding:10px 12px;font-size:.79rem;line-height:1.55;margin-bottom:10px">' +
+        'Esto <strong>reemplaza</strong> todo lo que hay hoy en este celular: turnos, ' +
+        'lotes, facturas, clientes, stock y finanzas. Lo que hayas registrado ' +
+        'después de ese respaldo <strong>se pierde</strong>.' +
+        '<br><br>Si lo que quieres es <em>juntar</em> el trabajo de los dos celulares, ' +
+        'esto no es: usa «Unir lo que me mandaron», que suma en vez de reemplazar.' +
+        '</div>' +
+        '<label>Escribe REEMPLAZAR para confirmar</label>' +
+        '<input type="text" id="dmsg-conf" autocomplete="off" placeholder="REEMPLAZAR" ' +
+        'oninput="DMSeguridad.verConf()">' +
+        '<div class="btn-row" style="margin-top:10px">' +
+          '<button class="btn btn-danger btn-sm" id="dmsg-btn-rest" disabled ' +
+          'onclick="DMSeguridad.escogerArchivo()">Escoger el archivo</button>' +
+          '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button>' +
+        '</div>' +
+        '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+        'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+        'Antes de restaurar, descarga un respaldo de lo que hay ahora. Si te ' +
+        'equivocas de archivo, ese es el único camino de vuelta.</div>');
+    });
+  }
+
+  function verConf() {
+    var v = String((document.getElementById('dmsg-conf') || {}).value || '').trim().toUpperCase();
+    var b = document.getElementById('dmsg-btn-rest');
+    if (b) b.disabled = (v !== 'REEMPLAZAR');
+  }
+
+  function escogerArchivo() {
+    var v = String((document.getElementById('dmsg-conf') || {}).value || '').trim().toUpperCase();
+    if (v !== 'REEMPLAZAR') return;
+    if (typeof cerrarModal === 'function') cerrarModal();
+    var i = document.getElementById('dm-imp');
+    if (i) i.click();
+  }
+
+  function arrancar(intentos) {
+    intentos = intentos || 0;
+    if (document.getElementById('dm-protegido')) { pintar(); return; }
+    if (intentos > 60) return;
+    setTimeout(function () { arrancar(intentos + 1); }, 200);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
+  } else { arrancar(0); }
+
+  return { configurar: configurar, guardarPin: guardarPin, quitarPin: quitarPin,
+           pedir: pedir, confirmarPin: confirmarPin, abrirBloque: abrirBloque,
+           cerrarSesion: cerrarSesion, restaurar: restaurar, verConf: verConf,
+           escogerArchivo: escogerArchivo, pintar: pintar,
+           hayPin: hayPin, desbloqueado: desbloqueado, comprobar: comprobar };
+})();
+
+</script>
+<script>
 /* ===== PERMISOS POR APARATO ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMPermisos — la versión del encargado.
@@ -14621,12 +15032,30 @@ var DMPermisos = (function () {
   var NOTA = '<div style="padding:26px 18px;text-align:center;color:#8A8175;font-size:.86rem">' +
              'Esta parte no está disponible en este celular.</div>';
 
-  /* Secciones de VENTAS. Ojo: el módulo marca el botón activo por su POSICIÓN
-     en la lista, así que los botones se ocultan pero no se sacan del DOM —
-     si se sacaran, se resaltaría el botón equivocado. */
-  var VENTAS = {
-    finanzas: 6, resumen: 9, cierres: 10   /* posición en nav.top y nav.bottom */
-  };
+  /* Secciones de VENTAS que se ocultan.
+
+     Los botones se OCULTAN pero no se sacan del DOM: el módulo marca el botón
+     activo por su POSICIÓN en la lista, así que sacar uno correría a todos los
+     demás y se resaltaría el equivocado.
+
+     Antes esta tabla guardaba esa posición a mano (finanzas: 6, resumen: 9…).
+     Bastó agregar la pestaña de Bodega para que esos números quedaran
+     corridos y se ocultara la pestaña que no era. Ahora el botón se busca por
+     el destino que lleva en su onclick, que no se mueve de sitio. */
+  var VENTAS = ['finanzas', 'resumen', 'cierres'];
+
+  /* Todos los botones —arriba y abajo— que llevan a una sección. */
+  function botonesDe(seccion) {
+    var out = [];
+    ['nav.top', 'nav.bottom'].forEach(function (nav) {
+      Array.prototype.forEach.call(
+        document.querySelectorAll('#mod-ventas ' + nav + ' button'), function (b) {
+          var o = b.getAttribute('onclick') || '';
+          if (o.indexOf("'" + seccion + "'") >= 0) out.push(b);
+        });
+    });
+    return out;
+  }
 
   function vaciar(el) {
     if (!el) return false;
@@ -14643,12 +15072,10 @@ var DMPermisos = (function () {
 
       if (que === 'utilidad') {
         /* Ventas: Finanzas, Resumen y Cierres */
-        Object.keys(VENTAS).forEach(function (sec) {
+        VENTAS.forEach(function (sec) {
           if (vaciar(document.getElementById('sec-' + sec))) quitados.push(sec);
-          var i = VENTAS[sec];
-          ['nav.top', 'nav.bottom'].forEach(function (nav) {
-            var bs = document.querySelectorAll('#mod-ventas ' + nav + ' button');
-            if (bs[i]) { bs[i].hidden = true; bs[i].style.display = 'none'; }
+          botonesDe(sec).forEach(function (b) {
+            b.hidden = true; b.style.display = 'none';
           });
         });
         /* que no se pueda llegar por código tampoco */
@@ -14698,7 +15125,7 @@ var DMPermisos = (function () {
   }
   arrancar();
 
-  return { aplicar: aplicar, perfil: perfil };
+  return { aplicar: aplicar, perfil: perfil, botonesDe: botonesDe, VENTAS: VENTAS };
 })();
 
 </script>
@@ -14967,180 +15394,207 @@ var DMDemo = (function () {
 })();
 
 </script>
-<!-- ══════════ PANEL DE AJUSTES GLOBALES ══════════ -->
+<!-- ══════════ PANEL DE AJUSTES GLOBALES ══════════
+     Tres bloques plegables en vez de trece secciones en fila:
+
+       1 · El negocio           — se toca una vez y queda
+       2 · Producción y personal — nómina, gente, conteos de bodega
+       3 · Datos y este celular  — protegido con PIN
+
+     Lo de comprar insumos ya NO está aquí: tiene su propia pestaña 🏬 Bodega
+     al lado de Inventario, porque es trabajo de todos los días y estaba
+     escondido entre la clave de la IA y el respaldo.
+-->
 <div id="dm-panel" onclick="if(event.target===this)DM.panel(false)">
   <div class="dm-card">
-    <h2>Ajustes generales</h2>
-    <div class="dm-sub">Estos ajustes valen para los tres módulos: Obleas, Arequipe y Ventas.</div>
+    <h2>Ajustes</h2>
+    <div class="dm-sub">Valen para los tres módulos: Obleas, Arequipe y Ventas.</div>
 
-    <label for="dm-key">Clave de IA (Anthropic)</label>
-    <input type="password" id="dm-key" placeholder="sk-ant-api03-..." autocomplete="off" oninput="DM.guardarKey()">
-    <div class="dm-estado" id="dm-key-estado"></div>
-    <div class="dm-nota">
-      Una sola clave para leer las planillas por foto en los tres módulos.
-      Se guarda solo en este dispositivo y nunca sale de él salvo hacia la API de Anthropic.
-      La obtienes en <strong>console.anthropic.com</strong>.
-    </div>
+    <!-- ─────────── 1 · EL NEGOCIO ─────────── -->
+    <details class="dm-bloque" open>
+      <summary>🏪 El negocio</summary>
 
-    <label>Nombre del negocio (sale en la remisión)</label>
-    <input type="text" id="dm-neg-nombre" placeholder="OBLEAS DULCE MARÍA" oninput="DMFactura.guardarNegocio()">
-    <div style="height:8px"></div>
-    <input type="text" id="dm-neg-lugar" placeholder="Sincelejo · Sucre" oninput="DMFactura.guardarNegocio()">
+      <label>Nombre del negocio (sale en la remisión)</label>
+      <input type="text" id="dm-neg-nombre" placeholder="OBLEAS DULCE MARÍA" oninput="DMFactura.guardarNegocio()">
+      <div style="height:8px"></div>
+      <input type="text" id="dm-neg-lugar" placeholder="Sincelejo · Sucre" oninput="DMFactura.guardarNegocio()">
 
-    <label>Numeración de facturas</label>
-    <div style="display:flex;gap:8px;align-items:flex-end">
-      <div style="flex:1">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Prefijo</div>
-        <input type="text" id="dm-fact-prefijo" placeholder="DM-" oninput="DMFactura.guardarCfgNum()">
+      <label>Numeración de facturas</label>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Prefijo</div>
+          <input type="text" id="dm-fact-prefijo" placeholder="DM-" oninput="DMFactura.guardarCfgNum()">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Siguiente número</div>
+          <input type="text" id="dm-fact-consec" inputmode="numeric" placeholder="1" oninput="DMFactura.guardarCfgNum()">
+        </div>
       </div>
-      <div style="flex:1">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Siguiente número</div>
-        <input type="text" id="dm-fact-consec" inputmode="numeric" placeholder="1" oninput="DMFactura.guardarCfgNum()">
+      <div class="dm-nota">
+        La próxima factura manual saldrá como <strong id="dm-fact-vista">DM-0001</strong>.
+        El número sube solo cada vez que guardas una.
       </div>
-    </div>
-    <div class="dm-nota">
-      La próxima factura manual saldrá como <strong id="dm-fact-vista">DM-0001</strong>.
-      El número sube solo cada vez que guardas una.
-    </div>
 
-    <label>Clientes</label>
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DMFactura.editarTelefonos()">📞 Poner teléfonos</button>
-    </div>
-
-    <label>Precios de venta</label>
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DMFactura.editarPrecios()">🏷️ Poner precios</button>
-    </div>
-    <div class="dm-nota">
-      Al lado de cada precio ves el costo real que calculó tu producción y el
-      margen que te queda, para no ponerlos a ojo.
-    </div>
-
-    <label>Nómina de producción</label>
-    <div class="dm-nota" id="dm-trab-estado">Calculando…</div>
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DM.panel(false);DMTrabajadores.abrir()">👷 Trabajadores</button>
-    </div>
-    <div id="dm-nomina-cuerpo"><div class="dm-nota">Calculando…</div></div>
-    <div class="dm-nota">
-      El período arranca el día siguiente al último pago. Al pagar queda el
-      egreso en Finanzas como costo de producción y el conteo de turnos
-      vuelve a empezar.
-    </div>
-
-    <label>Préstamos a empleados</label>
-    <select id="dm-prest-emp"></select>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <div style="flex:1">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Monto</div>
-        <input type="text" id="dm-prest-monto" inputmode="numeric" placeholder="0">
+      <label>Clientes y precios</label>
+      <div class="dm-row">
+        <button class="dm-btn ghost" onclick="DMFactura.editarTelefonos()">📞 Teléfonos</button>
+        <button class="dm-btn ghost" onclick="DMFactura.editarPrecios()">🏷️ Precios de venta</button>
       </div>
-      <div style="flex:1">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Sale de</div>
-        <select id="dm-prest-cuenta"><option value="caja">Caja</option><option value="banco">Banco</option></select>
+      <div class="dm-nota">
+        Al lado de cada precio ves el costo real que calculó tu producción y el
+        margen que te queda, para no ponerlos a ojo.
       </div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <div style="flex:1">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Fecha</div>
-        <input type="date" id="dm-prest-fecha">
+    </details>
+
+    <!-- ─────────── 2 · PRODUCCIÓN Y PERSONAL ─────────── -->
+    <details class="dm-bloque">
+      <summary>🏭 Producción y personal</summary>
+
+      <label>Trabajadores</label>
+      <div class="dm-nota" id="dm-trab-estado">Calculando…</div>
+      <div class="dm-row">
+        <button class="dm-btn ghost" onclick="DM.panel(false);DMTrabajadores.abrir()">👷 Quién está en nómina</button>
       </div>
-      <div style="flex:1.4">
-        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Nota</div>
-        <input type="text" id="dm-prest-nota" placeholder="Opcional">
+
+      <label>Nómina de producción</label>
+      <div id="dm-nomina-cuerpo"><div class="dm-nota">Calculando…</div></div>
+      <div class="dm-nota">
+        El período arranca el día siguiente al último pago. Al pagar queda el
+        egreso en Finanzas como costo de producción y el conteo de turnos
+        vuelve a empezar.
       </div>
-    </div>
-    <div class="dm-row">
-      <button class="dm-btn prim" onclick="DMPrestamos.registrar()">💵 Registrar préstamo</button>
-    </div>
-    <div class="dm-nota" id="dm-prest-saldos">Calculando…</div>
-    <div class="dm-nota">
-      El préstamo sale de caja o banco y queda registrado en Finanzas.
-      La deuda se descuenta sola de la próxima nómina de esa persona.
-    </div>
 
-    <label>Bodega</label>
-    <div class="dm-nota" id="dm-bodega-estado">Calculando…</div>
-    <div class="dm-row">
-      <button class="dm-btn prim" onclick="DM.panel(false);DMBodega.abrir(false)">🏬 Ver toda la bodega</button>
-      <button class="dm-btn ghost" onclick="DM.panel(false);DMBodega.abrir(true)">⚠ Por comprar</button>
-    </div>
-    <div class="dm-nota">
-      Los insumos de obleas y de arequipe en una sola lista, con su valor y lo
-      que está por acabarse. Desde ahí registras la compra sin entrar a cada
-      módulo.
-    </div>
+      <label>Préstamos a empleados</label>
+      <select id="dm-prest-emp"></select>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Monto</div>
+          <input type="text" id="dm-prest-monto" inputmode="numeric" placeholder="0">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Sale de</div>
+          <select id="dm-prest-cuenta"><option value="caja">Caja</option><option value="banco">Banco</option></select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Fecha</div>
+          <input type="date" id="dm-prest-fecha">
+        </div>
+        <div style="flex:1.4">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Nota</div>
+          <input type="text" id="dm-prest-nota" placeholder="Opcional">
+        </div>
+      </div>
+      <div class="dm-row">
+        <button class="dm-btn prim" onclick="DMPrestamos.registrar()">💵 Registrar préstamo</button>
+      </div>
+      <div class="dm-nota" id="dm-prest-saldos">Calculando…</div>
+      <div class="dm-nota">
+        El préstamo sale de caja o banco y queda registrado en Finanzas.
+        La deuda se descuenta sola de la próxima nómina de esa persona.
+      </div>
 
-    <label>Contar el inventario</label>
-    <div class="dm-nota" id="dm-apertura-estado">Calculando…</div>
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('obleas')">🧇 Contar obleas</button>
-      <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('arequipe')">🍯 Contar arequipe</button>
-    </div>
-    <div class="dm-nota">
-      Los lista todos juntos con lo que la app cree que hay. Escribes lo que
-      contaste y guardas una sola vez. Es un <strong>conteo</strong>, no una
-      compra: no mueve la plata.
-    </div>
+      <label>Contar el inventario de bodega</label>
+      <div class="dm-nota" id="dm-apertura-estado">Calculando…</div>
+      <div class="dm-row">
+        <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('obleas')">🧇 Contar obleas</button>
+        <button class="dm-btn ghost" onclick="DM.panel(false);DMApertura.abrir('arequipe')">🍯 Contar arequipe</button>
+      </div>
+      <div class="dm-nota">
+        Es un <strong>conteo</strong>, no una compra: no mueve la plata. Para
+        comprar insumos usa la pestaña <strong>🏬 Bodega</strong>.
+      </div>
 
-    <label>Con qué entra el negocio</label>
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DM.panel(false);DMSaldos.guia()">🏁 Saldos de apertura</button>
-    </div>
-    <div class="dm-nota">
-      Lo que ya tenías el día que empezaste: plata en caja y banco, lo que te
-      deben, lo que debes y los insumos en bodega. Te dice dónde va cada cosa
-      y qué llevas registrado.
-    </div>
+      <label>Con qué entra el negocio</label>
+      <div class="dm-row">
+        <button class="dm-btn ghost" onclick="DM.panel(false);DMSaldos.guia()">🏁 Saldos de apertura</button>
+      </div>
+      <div class="dm-nota">
+        Lo que ya tenías el día que empezaste: plata en caja y banco, lo que te
+        deben, lo que debes y los insumos en bodega. Te dice dónde va cada cosa
+        y qué llevas registrado.
+      </div>
+    </details>
 
-    <label>Este celular</label>
-    <input type="text" id="dm-aparato" placeholder="Planta, Calle, Tony, Encargado…"
-           oninput="DMSync.guardarAparato()">
-    <div class="dm-nota" id="dm-sync-estado">Calculando…</div>
-    <div class="dm-nota">
-      Ponle un nombre distinto a cada celular, y <strong>un prefijo de
-      numeración distinto</strong> arriba. Si los dos numeran igual, los dos
-      sacarían la misma remisión.
-    </div>
+    <!-- ─────────── 3 · DATOS Y ESTE CELULAR (con PIN) ─────────── -->
+    <details class="dm-bloque" id="dm-bloque-datos">
+      <summary>🔐 Datos y este celular</summary>
 
-    <label>Unir el trabajo de los dos celulares</label>
-    <div class="dm-row">
-      <button class="dm-btn prim" onclick="DMSync.exportarDia()">📤 Enviar mi día</button>
-      <button class="dm-btn ghost" onclick="document.getElementById('dm-unir').click()">📥 Unir lo que me mandaron</button>
-    </div>
-    <input type="file" id="dm-unir" accept=".json" style="display:none" onchange="DMSync.unirArchivo(event)">
-    <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DMSync.exportarCatalogo()">🏷️ Enviar productos y precios</button>
-    </div>
-    <div class="dm-nota">
-      «Enviar mi día» manda todo lo que registraste: remisiones, compras,
-      turnos y lotes. Al unir <strong>se suma, no se reemplaza</strong>, y el
-      stock se mueve solo con lo que entró nuevo — puedes unir el mismo archivo
-      dos veces sin dañar nada.<br>
-      «Enviar productos y precios» va del dueño al encargado y
-      <strong>no lleva utilidad, costos ni márgenes</strong>.
-    </div>
+      <div class="dm-nota" id="dm-seguridad-estado">Calculando…</div>
+      <div class="dm-row">
+        <button class="dm-btn prim" id="dm-btn-abrir" onclick="DMSeguridad.abrirBloque()">🔓 Abrir</button>
+        <button class="dm-btn ghost" id="dm-btn-pin" onclick="DMSeguridad.configurar()">🔒 Poner un PIN</button>
+        <button class="dm-btn ghost" id="dm-btn-cerrar" style="display:none" onclick="DMSeguridad.cerrarSesion()">Volver a cerrar</button>
+      </div>
 
-    <label>Histórico para analizar</label>
-    <div class="dm-nota" id="dm-datos-estado">Calculando…</div>
-    <div class="dm-row">
-      <button class="dm-btn prim" id="dm-btn-excel" onclick="DMDatos.exportarExcel()">📊 Descargar Excel</button>
-      <button class="dm-btn ghost" onclick="DMDatos.exportarFotos()">🖼️ Fotos en ZIP</button>
-    </div>
-    <div class="dm-nota">
-      El Excel trae una hoja por área —turnos, masas, lotes, insumos, facturas,
-      detalle de ventas, clientes, stock, finanzas y cierres— con filtros y
-      totales listos para tablas dinámicas.
-    </div>
+      <div id="dm-protegido">
 
-    <label>Respaldo de toda la empresa</label>
-    <div class="dm-nota" id="dm-resumen-datos">Calculando…</div>
-    <div class="dm-row">
-      <button class="dm-btn prim" onclick="DM.exportar()">⬇️ Descargar respaldo</button>
-      <button class="dm-btn ghost" onclick="document.getElementById('dm-imp').click()">⬆️ Restaurar</button>
-    </div>
-    <input type="file" id="dm-imp" accept=".json" style="display:none" onchange="DM.importar(event)">
+        <label for="dm-key">Clave de IA (Anthropic)</label>
+        <input type="password" id="dm-key" placeholder="sk-ant-api03-..." autocomplete="off" oninput="DM.guardarKey()">
+        <div class="dm-estado" id="dm-key-estado"></div>
+        <div class="dm-nota">
+          Una sola clave para leer las planillas por foto en los tres módulos.
+          Se guarda solo en este dispositivo y nunca sale de él salvo hacia la API de Anthropic.
+          La obtienes en <strong>console.anthropic.com</strong>.
+        </div>
+
+        <label>Este celular</label>
+        <input type="text" id="dm-aparato" placeholder="Planta, Calle, Tony, Encargado…"
+               oninput="DMSync.guardarAparato()">
+        <div class="dm-nota" id="dm-sync-estado">Calculando…</div>
+        <div class="dm-nota">
+          Ponle un nombre distinto a cada celular, y <strong>un prefijo de
+          numeración distinto</strong> arriba. Si los dos numeran igual, los dos
+          sacarían la misma remisión.
+        </div>
+
+        <label>Unir el trabajo de los dos celulares</label>
+        <div class="dm-row">
+          <button class="dm-btn prim" onclick="DMSync.exportarDia()">📤 Enviar mi día</button>
+          <button class="dm-btn ghost" onclick="document.getElementById('dm-unir').click()">📥 Unir lo que me mandaron</button>
+        </div>
+        <input type="file" id="dm-unir" accept=".json" style="display:none" onchange="DMSync.unirArchivo(event)">
+        <div class="dm-row">
+          <button class="dm-btn ghost" onclick="DMSync.exportarCatalogo()">🏷️ Enviar productos y precios</button>
+        </div>
+        <div class="dm-nota">
+          «Enviar mi día» manda todo lo que registraste: remisiones, compras,
+          turnos y lotes. Al unir <strong>se suma, no se reemplaza</strong>, y el
+          stock se mueve solo con lo que entró nuevo — puedes unir el mismo archivo
+          dos veces sin dañar nada.<br>
+          «Enviar productos y precios» va del dueño al encargado y
+          <strong>no lleva utilidad, costos ni márgenes</strong>.
+        </div>
+
+        <label>Histórico para analizar</label>
+        <div class="dm-nota" id="dm-datos-estado">Calculando…</div>
+        <div class="dm-row">
+          <button class="dm-btn prim" id="dm-btn-excel" onclick="DMDatos.exportarExcel()">📊 Descargar Excel</button>
+          <button class="dm-btn ghost" onclick="DMDatos.exportarFotos()">🖼️ Fotos en ZIP</button>
+        </div>
+        <div class="dm-nota">
+          El Excel trae una hoja por área —turnos, masas, lotes, insumos, facturas,
+          detalle de ventas, clientes, stock, finanzas y cierres— con filtros y
+          totales listos para tablas dinámicas.
+        </div>
+
+        <label>Respaldo de toda la empresa</label>
+        <div class="dm-nota" id="dm-resumen-datos">Calculando…</div>
+        <div class="dm-row">
+          <button class="dm-btn prim" onclick="DM.exportar()">⬇️ Descargar respaldo</button>
+          <button class="dm-btn ghost" onclick="DMSeguridad.restaurar()">⬆️ Restaurar</button>
+        </div>
+        <input type="file" id="dm-imp" accept=".json" style="display:none" onchange="DM.importar(event)">
+        <div class="dm-nota">
+          Descargar deja el archivo en el celular: pásalo a WhatsApp o al correo,
+          porque si se pierde el teléfono se pierde también el respaldo que estaba
+          dentro. <strong>Restaurar reemplaza</strong> lo que hay hoy; para juntar
+          el trabajo de dos celulares es «Unir lo que me mandaron».
+        </div>
+
+      </div>
+    </details>
 
     <div class="dm-row">
       <button class="dm-btn ghost" onclick="DM.panel(false)">Cerrar</button>
