@@ -14274,6 +14274,230 @@ var DMTrabajadores = (function () {
 
 </script>
 <script>
+/* ===== ACTIVO, PASIVO Y PATRIMONIO ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMSituacion — Activo, pasivo y patrimonio. Sencillo.
+
+       ACTIVO      = disponible (caja + bancos) + cuentas por cobrar + inventario
+       PASIVO      = cuentas por pagar
+       PATRIMONIO  = activo − pasivo
+
+   Nada más. Sin líneas manuales, sin comprobaciones cruzadas.
+
+   ─────────────────────────────────────────────────────────────────────────
+   LO ÚNICO QUE NO ES OBVIO: NO CONTAR EL AREQUIPE DOS VECES
+
+   Cuando se cierra un lote de arequipe, el tetero y la bolsa entran a DOS
+   sitios: al stock del módulo de Arequipe (`dm_ar_prod`) y al inventario de
+   Ventas. Pero al venderlos solo baja el de Ventas. O sea que `dm_ar_prod`
+   para tetero y bolsa es un acumulado de PRODUCCIÓN, no una existencia:
+   crece y nunca baja.
+
+   Sumar los dos inflaría el inventario cada vez que se produce. Así que el
+   producto terminado se toma SOLO del inventario de Ventas, y de
+   `dm_ar_prod` se toma únicamente la TARRINA de arequipe, que no se vende
+   suelta (va dentro del combo) y por eso no está en Ventas. Esa sí es una
+   existencia real y sí baja cuando se usa.
+
+   Existencias en negativo: se valoran en cero. Un activo no puede valer
+   menos que nada; un stock negativo es una compra que no se registró.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMSituacion = (function () {
+  'use strict';
+
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function esc5(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function pesos(v) {
+    var n = Math.round(num(v));
+    return (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('es-CO');
+  }
+  function leerLS(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+
+  /* Materias primas y empaques de las dos líneas. Solo lo que existe. */
+  function valorInsumos() {
+    var mp = 0;
+    function sumar(items) {
+      items.forEach(function (it) { if (it.cant > 0) mp += it.cant * it.costo; });
+    }
+    if (window.DMApertura && typeof DMApertura.lista === 'function') {
+      sumar(DMApertura.lista('obleas'));
+      sumar(DMApertura.lista('arequipe'));
+    }
+    return mp;
+  }
+
+  /* La tarrina: existencia real que NO está en Ventas porque no se vende
+     suelta. El tetero y la bolsa SÍ están en Ventas — tomarlos de aquí sería
+     contarlos dos veces (ver la nota de arriba). */
+  function valorTarrinas() {
+    var t = leerLS('dm_ar_prod', {}).tarrina;
+    if (!t || num(t.cant) <= 0) return 0;
+    return num(t.cant) * num(t.costoPromedio);
+  }
+
+  /* ── El cálculo ──────────────────────────────────────────────────────── */
+  function calcular() {
+    if (typeof dbGetAll !== 'function') return Promise.resolve(null);
+    return Promise.all([
+      dbGetAll(STORE_FINANZAS), dbGetAll(STORE_FACTURAS), dbGetAll(STORE_INVENTARIO)
+    ]).then(function (r) {
+      var movs = r[0], facturas = r[1], inv = r[2];
+
+      /* Los movimientos de facturas borradas no cuentan. */
+      var idsF = {}; facturas.forEach(function (f) { idsF[f.id] = true; });
+
+      var caja = 0, bancos = 0, cobrar = 0, pagar = 0;
+      movs.forEach(function (m) {
+        if (m.facturaId && !idsF[m.facturaId]) return;
+        var v = num(m.monto);
+        if (m.cuenta === 'caja') caja += (m.tipo === 'ingreso' ? 1 : -1) * v;
+        else if (m.cuenta === 'bancos') bancos += (m.tipo === 'ingreso' ? 1 : -1) * v;
+        else if (m.cuenta === 'cobrar' && m.tipo === 'pendiente') cobrar += v;
+        else if (m.cuenta === 'pagar' && m.tipo === 'pendiente') pagar += v;
+      });
+
+      /* Producto terminado: SOLO del inventario de Ventas. */
+      var terminado = 0;
+      inv.forEach(function (i) {
+        var st = num(i.stock);
+        if (st > 0) terminado += st * num(i.precioCosto);
+      });
+
+      var insumos = valorInsumos();
+      var tarrinas = valorTarrinas();
+      var inventario = terminado + tarrinas + insumos;
+
+      var disponible = caja + bancos;
+      var activo = disponible + cobrar + inventario;
+      var pasivo = pagar;
+
+      return {
+        caja: caja, bancos: bancos, disponible: disponible,
+        cobrar: cobrar,
+        terminado: terminado, tarrinas: tarrinas, insumos: insumos,
+        inventario: inventario,
+        activo: activo,
+        pagar: pagar, pasivo: pasivo,
+        patrimonio: activo - pasivo
+      };
+    });
+  }
+
+  /* ── Pintar ──────────────────────────────────────────────────────────── */
+  function linea(nombre, valor, opts) {
+    opts = opts || {};
+    return '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;' +
+      'padding:' + (opts.total ? '8px 0 2px' : '4px 0') + ';' +
+      (opts.total ? 'border-top:1px solid var(--crema2);font-weight:700' : '') + '">' +
+      '<span style="font-size:' + (opts.total ? '.86rem' : '.81rem') + '">' +
+      esc5(nombre) +
+      (opts.detalle ? '<span style="display:block;font-size:.66rem;font-weight:400;' +
+                      'color:var(--gris)">' + esc5(opts.detalle) + '</span>' : '') +
+      '</span>' +
+      '<span style="font-size:' + (opts.total ? '.92rem' : '.83rem') + ';white-space:nowrap;' +
+      'font-variant-numeric:tabular-nums' + (valor < 0 ? ';color:#B03020' : '') + '">' +
+      pesos(valor) + '</span></div>';
+  }
+
+  function pintar() {
+    var caja = document.getElementById('dm-situacion');
+    if (!caja) return Promise.resolve();
+    return calcular().then(function (d) {
+      if (!d) return;
+
+      var partes = [];
+      if (d.terminado) partes.push('producto terminado ' + pesos(d.terminado));
+      if (d.insumos) partes.push('insumos ' + pesos(d.insumos));
+      if (d.tarrinas) partes.push('tarrinas ' + pesos(d.tarrinas));
+
+      caja.innerHTML =
+        '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">' +
+          tarjeta('Activo', d.activo, 'var(--crema)') +
+          tarjeta('Pasivo', d.pasivo, 'var(--crema)') +
+          tarjeta('Patrimonio', d.patrimonio, '#F2EAD8') +
+        '</div>' +
+
+        '<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:.5px;color:var(--gris);margin-bottom:2px">Activo</div>' +
+        linea('Disponible', d.disponible,
+              { detalle: 'caja ' + pesos(d.caja) + ' · bancos ' + pesos(d.bancos) }) +
+        linea('Cuentas por cobrar', d.cobrar) +
+        linea('Inventario', d.inventario, { detalle: partes.join(' · ') }) +
+        linea('Total activo', d.activo, { total: true }) +
+
+        '<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:.5px;color:var(--gris);margin:16px 0 2px">Pasivo</div>' +
+        linea('Cuentas por pagar', d.pagar) +
+        linea('Total pasivo', d.pasivo, { total: true }) +
+
+        '<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;' +
+        'letter-spacing:.5px;color:var(--gris);margin:16px 0 2px">Patrimonio</div>' +
+        linea('Activo menos pasivo', d.patrimonio, { total: true });
+    }).catch(function (e) {
+      console.warn('DMSituacion:', e);
+      caja.innerHTML = '<p style="font-size:.8rem;color:var(--gris)">' +
+        'No se pudo calcular.</p>';
+    });
+  }
+
+  function tarjeta(rotulo, valor, fondo) {
+    return '<div style="flex:1;min-width:104px;background:' + fondo + ';border-radius:10px;' +
+      'padding:9px 11px">' +
+      '<div style="font-size:.62rem;color:var(--gris);text-transform:uppercase;' +
+      'letter-spacing:.4px">' + esc5(rotulo) + '</div>' +
+      '<div style="font-size:1.02rem;font-weight:700;font-variant-numeric:tabular-nums' +
+      (valor < 0 ? ';color:#B03020' : '') + '">' + pesos(valor) + '</div></div>';
+  }
+
+  /* ── Instalación: la tarjeta dentro de Resumen ───────────────────────── */
+  function instalar() {
+    var sec = document.getElementById('sec-resumen');
+    if (!sec || document.getElementById('dm-situacion')) return false;
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      '<div class="card-header"><h2>⚖️ Activo, pasivo y patrimonio</h2></div>' +
+      '<div id="dm-situacion"><p style="font-size:.8rem;color:var(--gris)">Calculando…</p></div>';
+    var kpi = document.getElementById('kpi-resumen');
+    if (kpi && kpi.nextSibling) sec.insertBefore(card, kpi.nextSibling);
+    else sec.appendChild(card);
+
+    /* que se repinte cada vez que Resumen se repinta */
+    if (typeof window.renderResumen === 'function' && !window.renderResumen._dmSit) {
+      var previo = window.renderResumen;
+      var nuevo = function () {
+        var r = previo.apply(this, arguments);
+        try { pintar(); } catch (e) { console.warn('DMSituacion:', e); }
+        return r;
+      };
+      nuevo._dmSit = true;
+      window.renderResumen = nuevo;
+    }
+    pintar();
+    return true;
+  }
+
+  function arrancar(intentos) {
+    intentos = intentos || 0;
+    if (instalar() || intentos > 60) return;
+    setTimeout(function () { arrancar(intentos + 1); }, 200);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
+  } else { arrancar(0); }
+
+  return { calcular: calcular, pintar: pintar, instalar: instalar };
+})();
+
+</script>
+<script>
 /* ===== HERRAMIENTAS AVANZADAS ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMAvanzadas — Recoge las herramientas de diagnóstico y las guarda en una
