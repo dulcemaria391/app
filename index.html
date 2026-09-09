@@ -13658,8 +13658,16 @@ var DMBodega = (function () {
   function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   function pesos(v) { return '$' + Math.round(num(v)).toLocaleString('es-CO'); }
 
-  /* En el celular del encargado, Finanzas no existe. Ofrecerle registrar la
-     salida de plata ahi seria escribir en una pantalla que el no puede abrir. */
+  /* ¿Este celular tiene las pantallas de Finanzas? El del encargado no.
+
+     Antes eso servia para ESCONDERLE la opcion de mover la plata. Fue un
+     error: el encargado es justamente quien hace las compras, y si no puede
+     decir «esta quedo a credito», Tony nunca se entera de la deuda.
+
+     Lo que se guarda viaja igual: el archivo de «Enviar mi día» incluye
+     facturaai_finanzas, asi que la salida de caja o la cuenta por pagar
+     llegan al celular de Tony cuando se unen los dos dias. El encargado
+     registra el hecho, aunque no vea el saldo. */
   function veFinanzas() {
     var p = (typeof window !== 'undefined' && window.DM_PERFIL) || null;
     if (!p || !p.ocultar) return true;
@@ -13877,9 +13885,31 @@ var DMBodega = (function () {
   }
 
   /* ── Registrar una compra ────────────────────────────────────────────── */
+  /* ── Como se pago la compra ──────────────────────────────────────────
+     Antes era una casilla de si/no que solo decia «tambien saca la plata».
+     Con eso, una compra a credito entraba al inventario y la deuda no
+     quedaba en ninguna parte: habia que ir aparte a Finanzas y escribirla
+     otra vez a mano, con dos montos que nada obligaba a que coincidieran.
+
+     Ahora se escoge COMO se pago, y la app hace lo que corresponda en un
+     solo registro. La opcion «solo el inventario» se conserva porque asi
+     venia funcionando: sirve cuando la salida de plata ya quedo anotada por
+     otro lado. */
+  var FORMAS = [
+    { id: 'caja',    rotulo: 'Contado · efectivo de caja' },
+    { id: 'banco',   rotulo: 'Contado · transferencia o consignación' },
+    { id: 'credito', rotulo: 'Crédito · queda por pagar' },
+    { id: 'abono',   rotulo: 'Abono ahora y el resto a crédito' },
+    { id: 'nada',    rotulo: 'Solo el inventario · la plata no se mueve' }
+  ];
+
   function comprar(linea, id) {
     var it = porId(linea, id);
     if (!it) { alert('No se encontró ese insumo.'); return; }
+    var opciones = FORMAS.map(function (o) {
+      return '<option value="' + o.id + '">' + esc4(o.rotulo) + '</option>';
+    }).join('');
+
     abrirModal(
       '<h3>🧾 Compra de ' + esc4(it.nombre) + '</h3>' +
       '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">' +
@@ -13889,7 +13919,7 @@ var DMBodega = (function () {
         '<div style="flex:1"><label>Cantidad (' + esc4(it.unidad) + ')</label>' +
         '<input type="number" step="any" min="0" id="dmb-cant" placeholder="0" ' +
         'oninput="DMBodega.previa()"></div>' +
-        '<div style="flex:1"><label>Pagaste en total</label>' +
+        '<div style="flex:1"><label>Valor de la compra</label>' +
         '<input type="number" step="any" min="0" id="dmb-total" placeholder="0" ' +
         'oninput="DMBodega.previa()"></div>' +
       '</div>' +
@@ -13901,28 +13931,88 @@ var DMBodega = (function () {
       '</div>' +
       '<div id="dmb-previa" style="margin-top:8px;font-size:.78rem;min-height:18px;' +
       'color:var(--gris)"></div>' +
-      (veFinanzas() ?
-        '<label style="display:flex;gap:7px;align-items:flex-start;margin-top:8px;' +
-        'font-size:.78rem;cursor:pointer">' +
-          '<input type="checkbox" id="dmb-fin" style="width:auto;margin-top:2px" ' +
-          'onchange="DMBodega.verCuenta()">' +
-          '<span>Registrar también la salida de plata en Finanzas</span></label>' +
-        '<div id="dmb-cuenta" style="display:none;margin-top:6px">' +
-          '<label>Sale de</label>' +
-          '<select id="dmb-medio"><option value="caja">Caja</option>' +
-          '<option value="bancos">Banco</option></select></div>' : '') +
+
+      '<label>Cómo la pagaste</label>' +
+      '<select id="dmb-forma" onchange="DMBodega.verForma()">' + opciones + '</select>' +
+
+      /* El banco: reusa el selector que ya trae Ventas, con su lista y su
+         opcion de agregar uno nuevo. */
+      '<div id="dmb-wrap-banco" style="display:none;margin-top:8px">' +
+        '<label>Banco</label>' +
+        (typeof selectorBancoHTML === 'function'
+          ? selectorBancoHTML('dmb', '')
+          : '<input type="text" id="dmb-banco" placeholder="Nombre del banco">') +
+      '</div>' +
+
+      '<div id="dmb-wrap-abono" style="display:none;margin-top:8px">' +
+        '<div style="display:flex;gap:8px">' +
+          '<div style="flex:1"><label>Abonaste</label>' +
+          '<input type="number" step="any" min="0" id="dmb-abono" placeholder="0" ' +
+          'oninput="DMBodega.previa()"></div>' +
+          '<div style="flex:1"><label>Sale de</label>' +
+          '<select id="dmb-abono-medio" onchange="DMBodega.verForma()">' +
+          '<option value="caja">Caja</option><option value="banco">Banco</option>' +
+          '</select></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div id="dmb-wrap-vence" style="display:none;margin-top:8px">' +
+        '<label>Vence el</label>' +
+        '<input type="date" id="dmb-vence">' +
+      '</div>' +
+
+      '<div id="dmb-explica" class="dm-nota" style="margin-top:9px;font-size:.74rem;' +
+      'line-height:1.5;background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;' +
+      'padding:9px 11px"></div>' +
+
       '<div class="btn-row" style="margin-top:10px">' +
         '<button class="btn btn-primary btn-sm" ' +
         'onclick="DMBodega.confirmar(\'' + esc4(linea) + '\',\'' + esc4(id) + '\')">' +
         '💾 Registrar compra</button>' +
         '<button class="btn btn-ghost btn-sm" onclick="DMBodega.volver()">Volver</button>' +
       '</div>');
+    verForma();
   }
 
-  function verCuenta() {
-    var c = document.getElementById('dmb-cuenta');
-    var f = document.getElementById('dmb-fin');
-    if (c && f) c.style.display = f.checked ? '' : 'none';
+  function forma() {
+    return String((document.getElementById('dmb-forma') || {}).value || 'caja');
+  }
+
+  /* Muestra solo los campos que hacen falta y explica, en palabras, que va a
+     quedar registrado. Nadie deberia tener que adivinarlo. */
+  function verForma() {
+    var f = forma();
+    var abonoBanco = String((document.getElementById('dmb-abono-medio') || {}).value || 'caja') === 'banco';
+    function ver(id, si) {
+      var e = document.getElementById(id);
+      if (e) e.style.display = si ? '' : 'none';
+    }
+    ver('dmb-wrap-banco', f === 'banco' || (f === 'abono' && abonoBanco));
+    ver('dmb-wrap-abono', f === 'abono');
+    ver('dmb-wrap-vence', f === 'credito' || f === 'abono');
+
+    var v = document.getElementById('dmb-vence');
+    if (v && !v.value && (f === 'credito' || f === 'abono')) {
+      var d = new Date(); d.setDate(d.getDate() + 30);
+      v.value = d.toISOString().slice(0, 10);
+    }
+
+    var e = document.getElementById('dmb-explica');
+    if (!e) return;
+    var textos = {
+      caja: 'Entra el material al inventario y <strong>sale la plata de caja</strong>, ' +
+            'como costo de producción.',
+      banco: 'Entra el material al inventario y <strong>sale la plata del banco</strong>, ' +
+             'como costo de producción.',
+      credito: 'Entra el material al inventario y queda una <strong>cuenta por pagar</strong> ' +
+               'a ese proveedor. La plata no se mueve todavía: sale el día que la ' +
+               'marques como pagada en Finanzas.',
+      abono: 'Entra el material al inventario, <strong>sale de caja o banco lo que abonaste</strong> ' +
+             'y el resto queda como <strong>cuenta por pagar</strong>.',
+      nada: 'Solo entra el material al inventario. <strong>No queda ni salida de plata ni ' +
+            'deuda</strong>: úsalo cuando ya anotaste el pago por otro lado.'
+    };
+    e.innerHTML = textos[f] || '';
   }
 
   function previa() {
@@ -13931,7 +14021,14 @@ var DMBodega = (function () {
     var cant = num((document.getElementById('dmb-cant') || {}).value);
     var total = num((document.getElementById('dmb-total') || {}).value);
     if (cant <= 0 || total <= 0) { caja.innerHTML = ''; return; }
-    caja.innerHTML = 'Sale a <strong>' + pesos(total / cant) + '</strong> por unidad.';
+    var txt = 'Sale a <strong>' + pesos(total / cant) + '</strong> por unidad.';
+    if (forma() === 'abono') {
+      var ab = num((document.getElementById('dmb-abono') || {}).value);
+      if (ab > 0 && ab < total) {
+        txt += ' Quedarían <strong>' + pesos(total - ab) + '</strong> por pagar.';
+      }
+    }
+    caja.innerHTML = txt;
   }
 
   function confirmar(linea, id) {
@@ -13941,11 +14038,42 @@ var DMBodega = (function () {
     var total = num((document.getElementById('dmb-total') || {}).value);
     var fecha = (document.getElementById('dmb-fecha') || {}).value || hoy();
     var prov = String((document.getElementById('dmb-prov') || {}).value || '').trim();
-    var aFin = veFinanzas() && !!(document.getElementById('dmb-fin') || {}).checked;
-    var medio = (document.getElementById('dmb-medio') || {}).value || 'caja';
+    var f = forma();
+    var vence = (document.getElementById('dmb-vence') || {}).value || '';
+    var abono = num((document.getElementById('dmb-abono') || {}).value);
+    var abonoMedio = String((document.getElementById('dmb-abono-medio') || {}).value || 'caja');
 
     if (cant <= 0) { alert('Escribe cuánto compraste.'); return; }
-    if (total <= 0) { alert('Escribe cuánto pagaste.'); return; }
+    if (total <= 0) { alert('Escribe el valor de la compra.'); return; }
+
+    /* Una cuenta por pagar sin nombre no sirve de nada: al ver la lista de
+       deudas no habria forma de saber a quien se le debe. */
+    if ((f === 'credito' || f === 'abono') && !prov) {
+      alert('Escribe el proveedor.\n\nSin nombre, la cuenta por pagar queda suelta y ' +
+            'después no sabrás a quién le debes.');
+      return;
+    }
+    if (f === 'abono') {
+      if (abono <= 0) { alert('Escribe cuánto abonaste.'); return; }
+      if (abono > total) {
+        alert('El abono no puede ser mayor que la compra.\n\nSi la pagaste toda, escoge ' +
+              '«Contado».');
+        return;
+      }
+      if (Math.abs(abono - total) < 0.5) {
+        alert('Abonaste el total: escoge «Contado» en vez de abono.');
+        return;
+      }
+    }
+
+    var banco = '';
+    if (f === 'banco' || (f === 'abono' && abonoMedio === 'banco')) {
+      banco = (typeof leerBanco === 'function')
+        ? leerBanco('dmb')
+        : String((document.getElementById('dmb-banco') || {}).value || '').trim();
+      if (!banco) { alert('Escoge el banco.'); return; }
+    }
+
     var cu = total / cant;
 
     var queda;
@@ -13999,20 +14127,34 @@ var DMBodega = (function () {
       try { if (typeof inv_renderAlertas === 'function') inv_renderAlertas(); } catch (e) {}
     }
 
-    var msg = '✅ Compra registrada: ' + redondo(cant) + ' ' + it.unidad + ' de ' +
-              it.nombre + '. Quedan ' + redondo(queda) + '.';
+    var msg = '✅ ' + redondo(cant) + ' ' + it.unidad + ' de ' + it.nombre +
+              '. Quedan ' + redondo(queda) + '.';
 
-    if (aFin) {
-      registrarEgreso(medio, total, it.nombre, prov, fecha)
-        .then(function (ok) {
-          cerrar(msg + (ok ? ' Salida de ' + (medio === 'caja' ? 'caja' : 'banco') +
-                             ' registrada.' : ''));
-          if (!ok) alert('El stock quedó registrado, pero la salida de plata no se pudo ' +
-                         'guardar. Anótala a mano en Finanzas.');
-        });
-      return;
+    /* Lo que va a Finanzas segun como se pago. Cada camino escribe UN registro:
+       la compra se anota una sola vez y el monto no se puede desalinear. */
+    var tareas = [];
+    if (f === 'caja' || f === 'banco') {
+      tareas.push(egreso(f, banco, total, it.nombre, prov, fecha));
+      msg += ' Salió de ' + (f === 'caja' ? 'caja' : banco) + '.';
+    } else if (f === 'credito') {
+      tareas.push(porPagar(total, prov, fecha, vence, it.nombre));
+      msg += ' Queda por pagar a ' + prov + '.';
+    } else if (f === 'abono') {
+      tareas.push(egreso(abonoMedio, banco, abono, it.nombre, prov, fecha));
+      tareas.push(porPagar(total - abono, prov, fecha, vence, it.nombre));
+      msg += ' Abonaste ' + pesos(abono) + '; quedan ' + pesos(total - abono) +
+             ' por pagar a ' + prov + '.';
     }
-    cerrar(msg);
+
+    if (!tareas.length) { cerrar(msg); return; }
+    Promise.all(tareas).then(function (r) {
+      var falló = r.filter(function (x) { return !x; }).length;
+      cerrar(msg);
+      if (falló) {
+        alert('El material entró al inventario, pero la parte de Finanzas no se pudo ' +
+              'guardar. Anótala a mano.');
+      }
+    });
   }
 
   /* Desde la pestana, «Volver» es cerrar el modal; desde el panel, es
@@ -14032,22 +14174,44 @@ var DMBodega = (function () {
     pintar();
   }
 
-  /* La compra de insumos es costo de producción, no gasto de operación. */
-  function registrarEgreso(medio, monto, nombre, prov, fecha) {
-    if (typeof dbPut !== 'function' || typeof STORE_FINANZAS === 'undefined') {
-      return Promise.resolve(false);
-    }
+  function hayFinanzas() {
+    return typeof dbPut === 'function' && typeof STORE_FINANZAS !== 'undefined';
+  }
+  function nuevoId() {
+    return (typeof uid === 'function') ? uid() : String(Date.now() + Math.random());
+  }
+
+  /* La compra de insumos es COSTO DE PRODUCCION, no gasto de operacion: por eso
+     clase 'produccion'. Si entrara como gasto, la utilidad quedaria mal repartida
+     entre lo que cuesta hacer el producto y lo que cuesta tener el negocio. */
+  function egreso(medio, banco, monto, nombre, prov, fecha) {
+    if (!hayFinanzas() || !(monto > 0)) return Promise.resolve(true);
+    var esBanco = (medio === 'banco' || medio === 'bancos');
     return dbPut(STORE_FINANZAS, {
-      id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
-      cuenta: medio === 'bancos' ? 'bancos' : 'caja',
+      id: nuevoId(),
+      cuenta: esBanco ? 'bancos' : 'caja',
       tipo: 'egreso', clase: 'produccion',
       categoria: 'Insumos', rubro: 'Compra de insumos', producto: nombre,
       monto: monto, fecha: fecha, facturaId: null,
-      banco: medio === 'bancos' ? '' : null,
+      banco: esBanco ? (banco || 'Sin especificar') : null,
       ref: 'Compra de ' + nombre + (prov ? ' · ' + prov : ''),
       cliente: null, ts: Date.now()
     }).then(function () { return true; })
-      .catch(function (e) { console.warn('registrarEgreso:', e); return false; });
+      .catch(function (e) { console.warn('egreso:', e); return false; });
+  }
+
+  /* La deuda con el proveedor, con la MISMA forma que usa la pantalla de
+     Cuentas por pagar de Ventas. Asi el boton «Pagada» que ya existe funciona
+     sobre esta sin tocar nada mas. */
+  function porPagar(monto, prov, fecha, vence, nombre) {
+    if (!hayFinanzas() || !(monto > 0)) return Promise.resolve(true);
+    return dbPut(STORE_FINANZAS, {
+      id: nuevoId(), cuenta: 'pagar', tipo: 'pendiente',
+      monto: monto, fecha: fecha, vence: vence || '',
+      proveedor: prov, banco: null,
+      ref: 'Compra de ' + nombre, cliente: null, ts: Date.now()
+    }).then(function () { return true; })
+      .catch(function (e) { console.warn('porPagar:', e); return false; });
   }
 
   /* ── Resumen en el panel de ajustes ──────────────────────────────────── */
@@ -14090,7 +14254,8 @@ var DMBodega = (function () {
   return { abrir: abrir, pestana: pestana, cuerpo: cuerpo, volver: volver,
            enPestanaAhora: enPestanaAhora, engancharNavegacion: engancharNavegacion,
            todo: todo, resumen: resumen, filtrar: filtrar,
-           comprar: comprar, previa: previa, verCuenta: verCuenta,
+           comprar: comprar, previa: previa, verForma: verForma, forma: forma,
+           egreso: egreso, porPagar: porPagar, FORMAS: FORMAS,
            confirmar: confirmar, enAlerta: enAlerta, pintar: pintar,
            veFinanzas: veFinanzas };
 })();
