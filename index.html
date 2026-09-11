@@ -645,6 +645,40 @@ body{
 #mod-ventas nav.bottom{padding-bottom:calc(6px + var(--dm-abajo))!important}
 #toast-wrap{bottom:calc(74px + var(--dm-abajo))}
 
+/* ══════════════════════════════════════════════════════════════════════════
+   SOMBRA DE «HAY MÁS BOTONES»
+
+   Las barras de Arequipe (9 destinos) y Ventas (13) se desplazan de lado,
+   pero en un celular caben 4 o 5. De ahi en adelante todo quedaba invisible
+   SIN NINGUNA SENAL de que la barra seguia: Finanzas, Caja, Gastos, Resumen
+   y Cierres existian pero nadie las encontraba.
+
+   La tecnica son cuatro degradados en capas. Las dos «tapas» van pegadas al
+   contenido (background-attachment: local) y las dos sombras van pegadas al
+   marco (scroll). Cuando la barra esta al comienzo, la tapa izquierda se
+   monta encima de su sombra y la borra; al deslizar, la tapa se va con el
+   contenido y la sombra aparece. O sea: la sombra sale SOLO del lado donde
+   de verdad hay mas botones, sin una linea de JavaScript.
+
+   El color de las tapas es el mismo #4A2C1A del fondo de la barra, con alfa
+   0 en el extremo en vez de «transparent», para que Safari no lo degrade
+   hacia gris.
+   ══════════════════════════════════════════════════════════════════════════ */
+#mod-arequipe nav,
+#mod-ventas nav.top,
+#mod-ventas nav.bottom{
+  background-color:#4A2C1A;
+  background-image:
+    linear-gradient(to right, #4A2C1A 35%, rgba(74,44,26,0)),
+    linear-gradient(to left,  #4A2C1A 35%, rgba(74,44,26,0)),
+    linear-gradient(to right, rgba(0,0,0,.34), rgba(0,0,0,0)),
+    linear-gradient(to left,  rgba(0,0,0,.34), rgba(0,0,0,0));
+  background-position:0 0, 100% 0, 0 0, 100% 0;
+  background-repeat:no-repeat;
+  background-size:38px 100%, 38px 100%, 20px 100%, 20px 100%;
+  background-attachment:local, local, scroll, scroll;
+}
+
 </style>
 </head>
 <body>
@@ -3105,11 +3139,7 @@ async function ob_renderInicio(){
       if(diasRI[d].ops.indexOf(op)<0)diasRI[d].ops.push(op);
     });
   });
-  var costosRI=Object.keys(diasRI).map(function(d){
-    var di=diasRI[d];
-    return di.paq>0?calcCostoVal(di.paq,di.har,di.gas,di.m1,di.m2,di.m3,di.ops,di.c1,di.c2,di.c3):0;
-  }).filter(function(v){return v>0;});
-  var costPromRI=costosRI.length?costosRI.reduce(function(a,b){return a+b;},0)/costosRI.length:0;
+  var costPromRI=costoPonderado(mesR);
   var harPaqRI=paqEqMes>0?((harMes/paqEqMes)*1000).toFixed(0):0;
 
   // KPI mes
@@ -3312,7 +3342,8 @@ async function renderRegs(){
     var rf=ob_normFecha(r.fecha);
     if(desde&&rf<desde)return;
     if(hasta&&rf>hasta)return;
-    if(!diasReg[rf])diasReg[rf]={fecha:rf,m1:0,m2:0,m3:0,c1:0,c2:0,c3:0,har:0,gas:0,ops:[],foto:null};
+    if(!diasReg[rf])diasReg[rf]={fecha:rf,m1:0,m2:0,m3:0,c1:0,c2:0,c3:0,har:0,gas:0,ops:[],foto:null,regs:[]};
+    diasReg[rf].regs.push(r);
     diasReg[rf].m1+=(r.totM1||0);
     diasReg[rf].m2+=(r.totM2||0);
     diasReg[rf].m3+=(r.totM3||0);
@@ -3334,7 +3365,7 @@ async function renderRegs(){
     var p=(d.m1||0)+(d.m2||0)+(d.m3||0);
     var combTotal=(d.c1||0)+(d.c2||0)+(d.c3||0);
     var paqEq=p+combTotal*(20/50);
-    var c=p?Math.round(calcCostoVal(p,d.har,d.gas,d.m1>0?1:0,d.m2>0?1:0,d.m3>0?1:0,d.ops,d.c1,d.c2,d.c3)):0;
+    var c=p?Math.round(costoPonderado(d.regs)):0;
     var gPaq=paqEq>0?Math.round((d.har||0)/paqEq*1000):0;
     var moTotal=calcMOporOps(d.ops);
     var moPaq=paqEq>0?Math.round(moTotal/paqEq):0;
@@ -3398,6 +3429,29 @@ function calcMOporOps(ops){
   return total;
 }
 function calcCostoVal(paq,harKg,gasCons,m1,m2,m3,ops,comb1,comb2,comb3){if(!paq)return 0;const paqEq=paq+((comb1||0)+(comb2||0)+(comb3||0))*(20/50);const cHar=paqEq>0?(harKg*(cfg.bulto/50))/paqEq:(harKg*(cfg.bulto/50))/paq;const cFij=cfg.lec+cfg.adi+cfg.ades+cfg.ico+cfg.bol;const cGas=(gasCons*cfg.mgas)/paqEq;var moT;if(ops&&ops.length){moT=calcMOporOps(ops);}else{moT=(m1?(cfg.maq1m+cfg.maq1c+cfg.maq1ma):0)+(m2?(cfg.maq2m+cfg.maq2c):0)+(m3?(cfg.maq3m+cfg.maq3c+cfg.maq3ma):0);}const cMO=moT/paqEq;const cOtros=(cfg.gas2+cfg.jona+cfg.guan+cfg.cin+cfg.caj+cfg.arr)/20/paqEq;const cArrSvc=(cfg.arrs/20)/paqEq;return cHar+cFij+cGas+cMO+cOtros+cArrSvc;}
+/* El costo por paquete de UN turno. La nomina paga por turno, asi
+   que este es el unico nivel donde el costo es cierto: sumar dos
+   turnos y costear el total pagaria la mano de obra una sola vez. */
+function costoTurno(r){
+  var p=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
+  if(p<=0)return 0;
+  var ops=[r.op1,r.op2,r.op3,r.op4,r.op5,r.op6,r.op7,r.op8].filter(Boolean);
+  return calcCostoVal(p,r.harTotal||0,r.gasConsumo||0,r.maq1||0,r.maq2||0,
+                      r.maq3||0,ops,r.totC1||0,r.totC2||0,r.totC3||0);
+}
+/* Promedio PONDERADO de varios turnos: cada turno pesa por los
+   paquetes que sacó. Un dia de 40 paquetes NO puede pesar lo mismo
+   que uno de 400 — con promedio simple, un dia flojo dispara el
+   costo promedio del mes y parece que se produce mas caro. */
+function costoPonderado(regs){
+  var num=0,den=0;
+  (regs||[]).forEach(function(r){
+    var p=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
+    if(p<=0)return;
+    num+=costoTurno(r)*p; den+=p;
+  });
+  return den>0?num/den:0;
+}
 async function cargarDiaCosto(){
   var hoyCSF=new Date().toISOString().slice(0,10);
   var elCSF=document.getElementById('cs-fecha');
@@ -3545,7 +3599,8 @@ async function calcRep(){
   var diasMap={};
   f.forEach(function(r){
     var d=ob_normFecha(r.fecha);
-    if(!diasMap[d])diasMap[d]={paq:0,har:0,gas:0,m1:0,m2:0,m3:0,c1:0,c2:0,c3:0,ops:[]};
+    if(!diasMap[d])diasMap[d]={paq:0,har:0,gas:0,m1:0,m2:0,m3:0,c1:0,c2:0,c3:0,ops:[],regs:[]};
+    diasMap[d].regs.push(r);
     diasMap[d].paq+=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
     diasMap[d].har+=(r.harTotal||0);
     diasMap[d].gas+=(r.gasConsumo||0);
@@ -3555,10 +3610,9 @@ async function calcRep(){
       if(diasMap[d].ops.indexOf(op)<0)diasMap[d].ops.push(op);
     });
   });
-  var costosDia=Object.values(diasMap).filter(function(d){return d.paq>0;}).map(function(d){
-    return calcCostoVal(d.paq,d.har,d.gas,d.m1,d.m2,d.m3,d.ops,d.c1,d.c2,d.c3);
-  }).filter(function(v){return v>0;});
-  var costProm=costosDia.length?costosDia.reduce(function(a,b){return a+b;},0)/costosDia.length:0;
+  var costProm=costoPonderado(Object.values(diasMap).reduce(function(a,d){
+    return a.concat(d.regs||[]);
+  },[]));
   var maxM=Math.max(pM1,pM2,pM3)||1;
   var maxC=Math.max(cM1,cM2,cM3)||1;
   var fmt=function(v){return '$'+Math.round(v).toLocaleString('es-CO');};
@@ -13749,8 +13803,13 @@ var DMBodega = (function () {
         '</div>' +
         '<div style="text-align:right;flex-shrink:0">' +
           '<div style="font-size:.8rem;font-weight:700">' + pesos(valor) + '</div>' +
-          '<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:.66rem;margin-top:2px" ' +
-          'onclick="DMBodega.comprar(\'' + esc4(it.linea) + '\',\'' + esc4(it.id) + '\')">＋ Compra</button>' +
+          '<div style="display:flex;gap:4px;margin-top:2px;justify-content:flex-end">' +
+            '<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:.66rem" ' +
+            'onclick="DMCorregir.abrir(\'' + esc4(it.linea) + '\',\'' + esc4(it.id) + '\')" ' +
+            'title="Ver y corregir movimientos">🧾</button>' +
+            '<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:.66rem" ' +
+            'onclick="DMBodega.comprar(\'' + esc4(it.linea) + '\',\'' + esc4(it.id) + '\')">＋ Compra</button>' +
+          '</div>' +
         '</div>' +
       '</div>';
   }
@@ -14076,6 +14135,12 @@ var DMBodega = (function () {
 
     var cu = total / cant;
 
+    /* Un numero propio de ESTA compra. Va tanto en el movimiento de inventario
+       como en lo que se escriba en Finanzas, para que corregir una compra mal
+       registrada pueda deshacer las dos cosas a la vez. Sin esto, borrar el
+       movimiento dejaba la salida de plata o la deuda colgando. */
+    var compraId = 'C' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+
     var queda;
     if (linea === 'obleas') {
       var inv = leer('obleas_inventario', {});
@@ -14094,7 +14159,7 @@ var DMBodega = (function () {
       movs.push({
         ts: new Date().toISOString(), fecha: fecha, tipo: 'entrada', insumo: id,
         cantidad: cant, costoUnitario: cu, costoTotal: total,
-        proveedor: prov, stockResultante: nuevo
+        proveedor: prov, stockResultante: nuevo, compraId: compraId
       });
       escribir('obleas_inv_movimientos', movs);
       queda = nuevo;
@@ -14114,7 +14179,7 @@ var DMBodega = (function () {
       mov.unshift({
         id: Date.now() + '_' + id, fecha: fecha, ins_id: id, tipo: 'compra',
         cant: cant, costoUnit: cu, costoPromDespues: a.costoPromedio,
-        prov: prov, ref: 'Compra'
+        prov: prov, ref: 'Compra', compraId: compraId
       });
       escribir('dm_ar_mov', mov);
       /* el costo por gramo de los lotes sale de esta tabla */
@@ -14134,14 +14199,14 @@ var DMBodega = (function () {
        la compra se anota una sola vez y el monto no se puede desalinear. */
     var tareas = [];
     if (f === 'caja' || f === 'banco') {
-      tareas.push(egreso(f, banco, total, it.nombre, prov, fecha));
+      tareas.push(egreso(f, banco, total, it.nombre, prov, fecha, compraId));
       msg += ' Salió de ' + (f === 'caja' ? 'caja' : banco) + '.';
     } else if (f === 'credito') {
-      tareas.push(porPagar(total, prov, fecha, vence, it.nombre));
+      tareas.push(porPagar(total, prov, fecha, vence, it.nombre, compraId));
       msg += ' Queda por pagar a ' + prov + '.';
     } else if (f === 'abono') {
-      tareas.push(egreso(abonoMedio, banco, abono, it.nombre, prov, fecha));
-      tareas.push(porPagar(total - abono, prov, fecha, vence, it.nombre));
+      tareas.push(egreso(abonoMedio, banco, abono, it.nombre, prov, fecha, compraId));
+      tareas.push(porPagar(total - abono, prov, fecha, vence, it.nombre, compraId));
       msg += ' Abonaste ' + pesos(abono) + '; quedan ' + pesos(total - abono) +
              ' por pagar a ' + prov + '.';
     }
@@ -14184,7 +14249,7 @@ var DMBodega = (function () {
   /* La compra de insumos es COSTO DE PRODUCCION, no gasto de operacion: por eso
      clase 'produccion'. Si entrara como gasto, la utilidad quedaria mal repartida
      entre lo que cuesta hacer el producto y lo que cuesta tener el negocio. */
-  function egreso(medio, banco, monto, nombre, prov, fecha) {
+  function egreso(medio, banco, monto, nombre, prov, fecha, compraId) {
     if (!hayFinanzas() || !(monto > 0)) return Promise.resolve(true);
     var esBanco = (medio === 'banco' || medio === 'bancos');
     return dbPut(STORE_FINANZAS, {
@@ -14195,7 +14260,7 @@ var DMBodega = (function () {
       monto: monto, fecha: fecha, facturaId: null,
       banco: esBanco ? (banco || 'Sin especificar') : null,
       ref: 'Compra de ' + nombre + (prov ? ' · ' + prov : ''),
-      cliente: null, ts: Date.now()
+      cliente: null, compraId: compraId || null, ts: Date.now()
     }).then(function () { return true; })
       .catch(function (e) { console.warn('egreso:', e); return false; });
   }
@@ -14203,13 +14268,13 @@ var DMBodega = (function () {
   /* La deuda con el proveedor, con la MISMA forma que usa la pantalla de
      Cuentas por pagar de Ventas. Asi el boton «Pagada» que ya existe funciona
      sobre esta sin tocar nada mas. */
-  function porPagar(monto, prov, fecha, vence, nombre) {
+  function porPagar(monto, prov, fecha, vence, nombre, compraId) {
     if (!hayFinanzas() || !(monto > 0)) return Promise.resolve(true);
     return dbPut(STORE_FINANZAS, {
       id: nuevoId(), cuenta: 'pagar', tipo: 'pendiente',
       monto: monto, fecha: fecha, vence: vence || '',
       proveedor: prov, banco: null,
-      ref: 'Compra de ' + nombre, cliente: null, ts: Date.now()
+      ref: 'Compra de ' + nombre, cliente: null, compraId: compraId || null, ts: Date.now()
     }).then(function () { return true; })
       .catch(function (e) { console.warn('porPagar:', e); return false; });
   }
@@ -14542,6 +14607,256 @@ var DMTrabajadores = (function () {
   return { abrir: abrir, agregar: agregar, quitar: quitar, guardar: guardar,
            restaurar: restaurar, lista: lista, aplicar: aplicar, pintar: pintar,
            turnosDe: turnosDe, ROLES: ROLES, MAQUINAS: MAQUINAS };
+})();
+
+</script>
+<script>
+/* ===== CORREGIR UNA COMPRA MAL REGISTRADA ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMCorregir — borrar una compra mal registrada y volverla a hacer bien.
+
+   Tony registró un aplicador con el precio equivocado. En Obleas existía un
+   botón para borrar un movimiento; en Arequipe NO existía ninguno. O sea que
+   un dedazo en el precio de un empaque quedaba metido para siempre dentro
+   del costo promedio, y ese costo es el que decide el precio de venta.
+
+   ─────────────────────────────────────────────────────────────────────────
+   POR QUÉ NO BASTA CON RESTAR
+
+   El costo promedio ponderado NO se puede deshacer restando: no hay forma de
+   sacar una compra del promedio sin saber en qué orden entró todo lo demás.
+   Por eso aquí el movimiento se quita del historial y el stock y el costo se
+   RECALCULAN desde cero, reproduciendo los movimientos que quedan en su
+   orden original. Es el mismo método que ya usaba Obleas.
+
+   Consecuencia: el resultado es el mismo que si esa compra nunca se hubiera
+   registrado. No queda rastro raro en el promedio.
+
+   ─────────────────────────────────────────────────────────────────────────
+   LA PLATA SE VA CON EL STOCK
+
+   Una compra ya no es solo un movimiento de inventario: según cómo se pagó,
+   pudo dejar una salida de caja, una salida de banco o una cuenta por pagar.
+   Borrar solo el movimiento dejaba esa plata colgando.
+
+   Desde ahora cada compra hecha en Bodega lleva un número propio (compraId)
+   que se escribe tanto en el movimiento como en lo que va a Finanzas. Al
+   corregirla se deshacen las dos cosas juntas.
+
+   Las compras viejas no tienen ese número. A esas se les borra el stock y se
+   avisa, con todas las letras, que la parte de la plata hay que revisarla a
+   mano — es preferible a borrarla en silencio y descuadrar Finanzas.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMCorregir = (function () {
+  'use strict';
+
+  function esc7(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function pesos(v) { return '$' + Math.round(num(v)).toLocaleString('es-CO'); }
+  function redondo(v) { return Math.round(num(v) * 1000) / 1000; }
+  function leer(k, d) {
+    try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; }
+    catch (e) { return d; }
+  }
+  function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+  /* ── Los movimientos de un insumo, en una forma común ─────────────────
+     Cada módulo guarda los suyos distinto. Aquí se traducen a una sola forma
+     para poder mostrarlos y borrarlos con el mismo código. `clave` es lo que
+     identifica al movimiento dentro de su lista. */
+  function movimientos(linea, id) {
+    var out = [];
+    if (linea === 'obleas') {
+      leer('obleas_inv_movimientos', []).forEach(function (m, i) {
+        if (m.insumo !== id) return;
+        out.push({
+          clave: String(m.ts || '') + '|' + i,
+          i: i, fecha: m.fecha || String(m.ts || '').slice(0, 10),
+          entrada: m.tipo === 'entrada',
+          cant: num(m.cantidad), costoUnit: num(m.costoUnitario),
+          nota: m.proveedor || '', compraId: m.compraId || null,
+          orden: String(m.ts || '')
+        });
+      });
+      /* obleas guarda del mas viejo al mas nuevo */
+      out.reverse();
+      return out;
+    }
+    var mov = leer('dm_ar_mov', []);
+    mov.forEach(function (m, i) {
+      if (m.ins_id !== id) return;
+      out.push({
+        clave: String(m.id != null ? m.id : '') + '|' + i,
+        i: i, fecha: m.fecha || '',
+        entrada: (m.tipo === 'compra' || m.tipo === 'entrada'),
+        cant: num(m.cant), costoUnit: num(m.costoUnit),
+        nota: m.prov || m.ref || '', compraId: m.compraId || null,
+        orden: String(i)
+      });
+    });
+    /* arequipe guarda del mas nuevo al mas viejo: ya viene en ese orden */
+    return out;
+  }
+
+  /* ── Recalcular stock y costo promedio desde el historial ─────────────
+     Se reproducen los movimientos EN SU ORDEN ORIGINAL. Una entrada mueve el
+     promedio ponderado; una salida solo baja la cantidad, porque consumir no
+     cambia lo que costó lo que queda. */
+  function replay(movsEnOrden) {
+    var stock = 0, prom = 0;
+    movsEnOrden.forEach(function (m) {
+      if (m.entrada) {
+        var total = stock + m.cant;
+        /* Con stock negativo el ponderado no significa nada: la entrada tapa
+           el hueco y el costo pasa a ser el de esa compra. */
+        prom = (stock < 0 || total <= 0) ? m.costoUnit
+             : (stock * prom + m.cant * m.costoUnit) / total;
+        stock = total;
+      } else {
+        stock -= m.cant;
+      }
+    });
+    return { stock: stock, prom: prom };
+  }
+
+  /* ── Borrar un movimiento ─────────────────────────────────────────────── */
+  function borrar(linea, id, clave) {
+    var lista = movimientos(linea, id);
+    var mov = null;
+    for (var k = 0; k < lista.length; k++) if (lista[k].clave === clave) mov = lista[k];
+    if (!mov) { alert('Ese movimiento ya no está.'); return; }
+
+    var aviso = '¿Borrar este movimiento?\n\n' +
+      (mov.entrada ? 'Entrada' : 'Salida') + ' de ' + redondo(mov.cant) +
+      ' a ' + pesos(mov.costoUnit) + ' c/u.\n\n' +
+      'El stock y el costo promedio se recalculan desde el historial, como si ' +
+      'nunca se hubiera registrado.';
+    if (mov.compraId) {
+      aviso += '\n\nTambién se deshace lo que esta compra dejó en Finanzas ' +
+               '(la salida de plata o la cuenta por pagar).';
+    } else {
+      aviso += '\n\nOJO: esta compra es anterior y no quedó enlazada con Finanzas. ' +
+               'Si en su momento anotaste la salida de plata, revísala a mano.';
+    }
+    if (!confirm(aviso)) return;
+
+    if (linea === 'obleas') {
+      var movs = leer('obleas_inv_movimientos', []);
+      movs.splice(mov.i, 1);
+      escribir('obleas_inv_movimientos', movs);
+      var r = replay(movimientos('obleas', id).slice().reverse());
+      var inv = leer('obleas_inventario', {});
+      if (!inv[id]) inv[id] = { stock: 0, costoPromedio: 0, stockMin: 0 };
+      inv[id].stock = r.stock;
+      inv[id].costoPromedio = r.prom;
+      escribir('obleas_inventario', inv);
+      try { if (typeof renderInvStock === 'function') renderInvStock(); } catch (e) {}
+      try { if (typeof renderComprasRecientes === 'function') renderComprasRecientes(); } catch (e) {}
+    } else {
+      var mv = leer('dm_ar_mov', []);
+      mv.splice(mov.i, 1);
+      escribir('dm_ar_mov', mv);
+      /* la lista de arequipe va del mas nuevo al mas viejo: se invierte para
+         reproducirla en el orden en que ocurrio */
+      var r2 = replay(movimientos('arequipe', id).slice().reverse());
+      var st = leer('dm_ar_inv', {});
+      if (!st[id]) st[id] = { cantActual: 0, costoPromedio: 0, minimo: 0 };
+      st[id].cantActual = r2.stock;
+      st[id].costoPromedio = r2.prom;
+      escribir('dm_ar_inv', st);
+      /* el costo por gramo de los lotes sale de esta tabla */
+      var pr = leer('dm_ar_precios', {});
+      if (r2.prom > 0) { pr[id] = r2.prom; escribir('dm_ar_precios', pr); }
+      try { if (typeof inv_render === 'function') inv_render(); } catch (e) {}
+      try { if (typeof inv_renderHistorial === 'function') inv_renderHistorial(); } catch (e) {}
+      try { if (typeof inv_renderAlertas === 'function') inv_renderAlertas(); } catch (e) {}
+    }
+
+    quitarDeFinanzas(mov.compraId).then(function (n) {
+      var msg = '✅ Movimiento borrado. Stock y costo recalculados.';
+      if (n) msg += ' ' + n + ' registro(s) de Finanzas deshecho(s).';
+      if (typeof toast === 'function') toast(msg, 'ok'); else alert(msg);
+      try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {}
+      try { if (window.DMBodega) { DMBodega.pintar(); DMBodega.pestana(false); } } catch (e) {}
+      abrir(linea, id);
+    });
+  }
+
+  /* Deshace la salida de plata o la cuenta por pagar de esa compra. */
+  function quitarDeFinanzas(compraId) {
+    if (!compraId || typeof dbGetAll !== 'function' || typeof STORE_FINANZAS === 'undefined') {
+      return Promise.resolve(0);
+    }
+    return dbGetAll(STORE_FINANZAS).then(function (todos) {
+      var suyos = todos.filter(function (m) { return m.compraId === compraId; });
+      if (!suyos.length) return 0;
+      return Promise.all(suyos.map(function (m) { return dbDel(STORE_FINANZAS, m.id); }))
+        .then(function () { return suyos.length; });
+    }).catch(function (e) { console.warn('quitarDeFinanzas:', e); return 0; });
+  }
+
+  /* ── La pantalla ─────────────────────────────────────────────────────── */
+  function abrir(linea, id) {
+    if (typeof abrirModal !== 'function') return;
+    var it = null;
+    try {
+      var todos = DMBodega.todo();
+      for (var k = 0; k < todos.length; k++) {
+        if (todos[k].linea === linea && todos[k].id === id) it = todos[k];
+      }
+    } catch (e) {}
+    if (!it) { alert('No se encontró ese insumo.'); return; }
+
+    var lista = movimientos(linea, id).slice(0, 30);
+    var filas = lista.map(function (m) {
+      return '<div style="display:flex;gap:8px;align-items:center;padding:6px 0;' +
+        'border-bottom:1px solid var(--crema2)">' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:.8rem;font-weight:600">' +
+              '<span style="color:' + (m.entrada ? '#2A6B4A' : '#B03020') + '">' +
+              (m.entrada ? '▲ entra ' : '▼ sale ') + redondo(m.cant) + '</span>' +
+              ' · ' + pesos(m.costoUnit) + ' c/u' +
+            '</div>' +
+            '<div style="font-size:.66rem;color:var(--gris)">' +
+              esc7(m.fecha) + (m.nota ? ' · ' + esc7(m.nota) : '') +
+              (m.compraId ? '' : ' · sin enlace a Finanzas') +
+            '</div>' +
+          '</div>' +
+          '<button class="btn btn-ghost btn-sm" style="flex-shrink:0;padding:3px 9px;color:#B03020" ' +
+          'onclick="DMCorregir.borrar(\'' + esc7(linea) + '\',\'' + esc7(id) + '\',\'' +
+          esc7(m.clave) + '\')">🗑️</button>' +
+        '</div>';
+    }).join('');
+
+    abrirModal(
+      '<h3>🧾 Movimientos de ' + esc7(it.nombre) + '</h3>' +
+      '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">' +
+      'Hay <strong>' + redondo(it.cant) + ' ' + esc7(it.unidad) + '</strong> a ' +
+      pesos(it.costo) + ' por ' + esc7(it.unidad) + '. Borra el movimiento que ' +
+      'quedó mal y vuelve a registrarlo con el valor correcto.</p>' +
+      '<div style="max-height:48vh;overflow-y:auto">' +
+        (filas || '<p style="font-size:.82rem;color:var(--gris);padding:12px 0">' +
+                  'Este insumo no tiene movimientos registrados.</p>') +
+      '</div>' +
+      '<div class="btn-row" style="margin-top:10px">' +
+        '<button class="btn btn-primary btn-sm" onclick="DMBodega.comprar(\'' +
+        esc7(linea) + '\',\'' + esc7(id) + '\')">＋ Registrar la compra buena</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="DMBodega.volver()">Volver</button>' +
+      '</div>' +
+      '<div class="dm-nota" style="margin-top:10px;font-size:.74rem;line-height:1.5;' +
+      'background:#FDF6E8;border:1px solid #E8D9B8;border-radius:9px;padding:9px 11px">' +
+      'Al borrar, el stock y el costo promedio se <strong>recalculan desde el ' +
+      'historial</strong>: queda igual que si esa compra nunca se hubiera hecho. ' +
+      'Las compras registradas desde Bodega también deshacen su salida de plata ' +
+      'o su cuenta por pagar.</div>');
+  }
+
+  return { abrir: abrir, borrar: borrar, movimientos: movimientos,
+           replay: replay, quitarDeFinanzas: quitarDeFinanzas };
 })();
 
 </script>
@@ -15764,6 +16079,12 @@ var DMDemo = (function () {
     <div class="dm-row">
       <button class="dm-btn ghost" onclick="DM.panel(false)">Cerrar</button>
     </div>
+
+    <!-- El constructor escribe aquí la fecha en que armó este archivo. Sirve
+         para saber, mirando el celular, si ya entró la actualización o si
+         todavía está viendo una copia guardada en caché. -->
+    <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
+                margin-top:10px;opacity:.75">Versión del 11/09/2026 15:05</div>
   </div>
 </div>
 
