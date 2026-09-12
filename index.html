@@ -1124,6 +1124,7 @@ body{
   </div>
   <div id="dbInf" style="margin-top:12px;font-size:12px;color:var(--t2);line-height:2;background:var(--bg2);padding:10px;border-radius:8px"></div>
 <button class="btn bp btn-full" onclick="guardarCfg()" style="margin-top:4px">💾 Guardar configuración</button>
+<button class="btn bs btn-full" style="margin-top:8px" onclick="pg('inicio')">✖️ Cerrar</button>
 </div>
 </div>
 
@@ -1165,18 +1166,11 @@ body{
         <option value="bolsa_termo">Bolsa termo encogible combos (unidades)</option>
       </select>
     </div>
-    <div class="row2">
-      <div class="f"><label>Cantidad</label><input type="number" id="inv-cant" min="0" step="0.001" inputmode="decimal" placeholder="0"></div>
-      <div class="f"><label>Costo total ($)</label><input type="number" id="inv-costo" min="0" inputmode="numeric" placeholder="0"></div>
+    <button class="btn bp btn-full" onclick="abrirCompraBodega()">🛒 Registrar compra</button>
+    <div style="font-size:11px;color:var(--t2);margin-top:8px">
+      Se abre la misma pantalla de 🏬 Bodega (en Ventas): ahí escoges cómo la pagaste
+      (caja, banco, crédito o abono). La compra queda igual se registre desde aquí o desde allá.
     </div>
-    <div class="f"><label>Fecha</label><input type="date" id="inv-fecha"></div>
-    <div class="f"><label>Proveedor (opcional)</label><input type="text" id="inv-prov" placeholder="Nombre proveedor"></div>
-    <div class="sec" style="background:var(--gr3);border-color:var(--gr4)">
-      <div style="font-size:12px;color:var(--t2)">Costo unitario que se registrará:</div>
-      <div id="inv-preview-costo" style="font-size:18px;font-weight:700;color:var(--gr);margin-top:4px">$0 / unidad</div>
-      <div id="inv-preview-prom" style="font-size:11px;color:var(--t2);margin-top:2px"></div>
-    </div>
-    <button class="btn bp btn-full" onclick="registrarCompra()">💾 Registrar compra</button>
   </div>
   <div class="sec">
     <div class="stit">📋 Últimas compras</div>
@@ -1450,22 +1444,13 @@ body{
     <div class="card-header"><h2>🛒 Registrar Compra</h2></div>
     <div class="alert" id="al-inv"></div>
     <div class="fg c2">
-      <div><label>Insumo / Material</label><select id="inv-ins-sel" onchange="inv_selIns()"><option value="">Seleccionar...</option></select></div>
-      <div><label>Fecha de compra</label><input type="date" id="ar-inv-fecha"></div>
-      <div><label>Cantidad comprada</label><input type="number" id="ar-inv-cant" placeholder="0" step="any" oninput="inv_calcPreview()"></div>
-      <div><label>Costo por unidad ($)</label><input type="number" id="ar-inv-costo" placeholder="0" step="any" oninput="inv_calcPreview()"></div>
-      <div><label>Proveedor (opcional)</label><input type="text" id="ar-inv-prov" placeholder="Nombre del proveedor"></div>
-      <div><label>Stock mínimo alerta</label><input type="number" id="inv-minimo" placeholder="0" step="any"></div>
+      <div style="grid-column:1/-1"><label>Insumo / Material</label><select id="inv-ins-sel"><option value="">Seleccionar...</option></select></div>
     </div>
-    <div id="inv-preview" style="display:none;background:var(--crema);border-radius:8px;padding:12px;margin-top:10px;font-size:.82rem">
-      <div style="font-weight:700;color:var(--cafe);margin-bottom:6px">Vista previa — costo promedio ponderado:</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div><div style="color:var(--gris);font-size:.72rem;text-transform:uppercase">Stock actual</div><div id="inv-pre-actual" style="font-weight:600">—</div></div>
-        <div><div style="color:var(--gris);font-size:.72rem;text-transform:uppercase">Nuevo stock</div><div id="inv-pre-nuevo" style="font-weight:600;color:var(--verde)">—</div></div>
-        <div><div style="color:var(--gris);font-size:.72rem;text-transform:uppercase">Nuevo costo prom.</div><div id="inv-pre-cpm" style="font-weight:600;color:var(--caramelo)">—</div></div>
-      </div>
+    <div class="btn-row"><button class="btn btn-success" onclick="inv_abrirCompraBodega()">🛒 Registrar compra</button></div>
+    <div style="font-size:.78rem;color:var(--gris);margin-top:8px">
+      Se abre la misma pantalla de 🏬 Bodega (en Ventas): ahí escoges cómo la pagaste
+      (caja, banco, crédito o abono). La compra queda igual se registre desde aquí o desde allá.
     </div>
-    <div class="btn-row"><button class="btn btn-success" onclick="inv_registrarCompra()">✅ Registrar compra</button></div>
   </div>
   </div>
   <div id="itab-ar-historial-cont" style="display:none">
@@ -1715,6 +1700,7 @@ body{
       <a href="https://dulcemaria391.github.io/Arequipe" style="color:var(--caramelo)">dulcemaria391.github.io/Arequipe</a>
     </p>
   </div>
+  <div class="card"><div class="btn-row"><button class="btn btn-ghost btn-full" onclick="tab('inicio',null)">✖️ Cerrar</button></div></div>
 </section>
 </main>
 
@@ -2363,12 +2349,11 @@ var DM = (function () {
       try { if (window.DMFactura) DMFactura.pintarCfgNum(); } catch (e) {}
       try { if (window.DMFactura) DMFactura.pintarNegocio(); } catch (e) {}
       try { if (window.DMDatos) DMDatos.resumen(); } catch (e) {}
-      try { if (window.DMPrestamos) DMPrestamos.pintar(); } catch (e) {}
-      try { if (window.DMNomina) DMNomina.pintar(); } catch (e) {}
+      /* Nómina y préstamos ya no viven aquí: se movieron al ícono 👷
+         Nómina (ver DMNomina.abrirModal en costos.js), para no pintar
+         ni repetir la misma información dos veces. */
       try { if (window.DMSync) DMSync.pintar(); } catch (e) {}
       try { if (window.DMApertura) DMApertura.pintar(); } catch (e) {}
-      try { var pf = document.getElementById('dm-prest-fecha');
-        if (pf && !pf.value) pf.value = new Date().toISOString().slice(0, 10); } catch (e) {}
     }
   }
 
@@ -2616,6 +2601,23 @@ var DM = (function () {
     MODULOS: MODULOS, CLAVES_LS: CLAVES_LS, IDB_STORES: IDB_STORES
   };
 })();
+
+/* ── Pestañas dentro del modal de Nómina (👷) ─────────────────────────────
+   «Lo trabajado» (lo de siempre) y «Préstamos» (el cuadro que antes vivía
+   suelto en Ajustes). Vive fuera de DM porque solo mueve dos <div> del
+   modal — no toca almacenamiento ni cálculos. */
+function dmNomTab(which) {
+  var esTrab = which === 'trabajado';
+  var pT = document.getElementById('dm-nom-panel-trabajado');
+  var pP = document.getElementById('dm-nom-panel-prestamos');
+  var bT = document.getElementById('dm-nom-tab-trabajado');
+  var bP = document.getElementById('dm-nom-tab-prestamos');
+  if (pT) pT.style.display = esTrab ? '' : 'none';
+  if (pP) pP.style.display = esTrab ? 'none' : '';
+  if (bT) bT.className = 'dm-btn ' + (esTrab ? 'prim' : 'ghost');
+  if (bP) bP.className = 'dm-btn ' + (esTrab ? 'ghost' : 'prim');
+  if (!esTrab) { try { if (window.DMPrestamos) DMPrestamos.pintar(); } catch (e) {} }
+}
 
 </script>
 <script>
@@ -3685,8 +3687,14 @@ async function calcRep(){
       var opL=(op||'').toLowerCase().trim();
       var found=null;
       for(var wi=0;wi<WORKERS.length;wi++){
-        var wn=WORKERS[wi].nombre.toLowerCase();
-        if(opL===wn||opL.indexOf(wn)===0||wn.indexOf(opL)===0||(opL.length>=4&&wn.indexOf(opL.slice(0,4))===0)){found=WORKERS[wi].nombre;break;}
+        if(WORKERS[wi].nombre.toLowerCase()===opL){found=WORKERS[wi].nombre;break;}
+      }
+      if(!found){
+        var candRep=WORKERS.filter(function(w){
+          var wn=w.nombre.toLowerCase();
+          return wn.indexOf(opL)===0||opL.indexOf(wn)===0;
+        });
+        if(candRep.length===1)found=candRep[0].nombre;
       }
       var key=found||op;
       if(!porOp[key])porOp[key]=0;porOp[key]+=paq;
@@ -4258,6 +4266,12 @@ document.addEventListener('DOMContentLoaded', function(){
   if(insumoEl) insumoEl.addEventListener('change', updatePreview);
 });
 
+function abrirCompraBodega(){
+  var key=document.getElementById('inv-insumo').value;
+  if(!key){ showAlrt('inv','⚠ Selecciona un insumo','err'); return; }
+  if(typeof DMBodega==='undefined'||!DMBodega.comprar){ showAlrt('inv','⚠ No se pudo abrir la pantalla de compra','err'); return; }
+  DMBodega.comprar('obleas', key);
+}
 function registrarCompra(){
   var key = document.getElementById('inv-insumo').value;
   var cant = parseFloat(document.getElementById('inv-cant').value)||0;
@@ -4947,7 +4961,10 @@ var ADHESIVO  = {tetero:160, bolsa:160, tarrina:120};
 function ar_gId(id){ return document.getElementById(id); }
 function fmt(n){ return new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',minimumFractionDigits:0}).format(n||0); }
 function fmtN(n){ return new Intl.NumberFormat('es-CO').format(n||0); }
-function hoy(){ return new Date().toISOString().split('T')[0]; }
+function hoy(){
+  var d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function ar_normFecha(f){
   if(!f) return '';
   f=String(f).trim();
@@ -5227,7 +5244,7 @@ function renderTabla(){
   var arr=getRegistros();
   if(mes) arr=arr.filter(function(r){
     var f=ar_normFecha(r.fecha);
-    return f.slice(0,7)===mes;
+    return !f||f.slice(0,7)===mes;
   });
   var wrap=ar_gId('tabla-regs');
   if(!arr.length){
@@ -5485,8 +5502,8 @@ function generarReporte(){
   var desdeRaw=ar_gId('rep-desde').value, hastaRaw=ar_gId('rep-hasta').value, prod=ar_gId('rep-prod').value;
   var arr=getRegistros();
   var desde=ar_normFecha(desdeRaw), hasta=ar_normFecha(hastaRaw);
-  if(desde) arr=arr.filter(function(r){ return ar_normFecha(r.fecha)>=desde; });
-  if(hasta) arr=arr.filter(function(r){ return ar_normFecha(r.fecha)<=hasta; });
+  if(desde) arr=arr.filter(function(r){ var f=ar_normFecha(r.fecha); return !f||f>=desde; });
+  if(hasta) arr=arr.filter(function(r){ var f=ar_normFecha(r.fecha); return !f||f<=hasta; });
   // Si filtro dejó vacío pero hay registros, mostrar todos
   if(arr.length===0) arr=getRegistros();
   if(prod) arr=arr.filter(function(r){ return r.tipo===prod; });
@@ -5637,8 +5654,8 @@ function exportCSV(arr){
 function exportCSVRep(){
   var desde=ar_normFecha(ar_gId('rep-desde').value), hasta=ar_normFecha(ar_gId('rep-hasta').value);
   var arr=getRegistros();
-  if(desde) arr=arr.filter(function(r){ return ar_normFecha(r.fecha)>=desde; });
-  if(hasta) arr=arr.filter(function(r){ return ar_normFecha(r.fecha)<=hasta; });
+  if(desde) arr=arr.filter(function(r){ var f=ar_normFecha(r.fecha); return !f||f>=desde; });
+  if(hasta) arr=arr.filter(function(r){ var f=ar_normFecha(r.fecha); return !f||f<=hasta; });
   exportCSV(arr);
 }
 
@@ -5652,12 +5669,14 @@ function ar_calcNomina(){
   var angelSal=(parseFloat(ar_gId('nom-angel-dia').value)||62000)*turnos;
   var angelBono=(parseFloat(ar_gId('nom-angel-bono').value)||5000)*turnos;
   var angelTot=angelSal+angelBono;
-  var tonyTot=(parseFloat(ar_gId('nom-tony-dia').value)||30000)*turnos;
+  var tonySal=(parseFloat(ar_gId('nom-tony-dia').value)||30000)*turnos;
+  var tonyBono=(parseFloat(ar_gId('nom-tony-bono').value)||0)*turnos;
+  var tonyTot=tonySal+tonyBono;
   var total=angelTot+tonyTot;
   var fechas=arr.map(function(r){ return r.fecha; }).join(', ');
   var h='<table><thead><tr><th>Empleado</th><th>Cargo</th><th>Turnos</th><th>Salario base</th><th>Bono</th><th>Total</th></tr></thead><tbody>'+
     '<tr><td><strong>Ángel</strong></td><td>Operario</td><td>'+turnos+'</td><td>'+fmt(angelSal)+'</td><td>'+fmt(angelBono)+'</td><td><strong>'+fmt(angelTot)+'</strong></td></tr>'+
-    '<tr><td><strong>Tony</strong></td><td>Supervisor</td><td>'+turnos+'</td><td>'+fmt(tonyTot)+'</td><td>'+fmt(0)+'</td><td><strong>'+fmt(tonyTot)+'</strong></td></tr>'+
+    '<tr><td><strong>Tony</strong></td><td>Supervisor</td><td>'+turnos+'</td><td>'+fmt(tonySal)+'</td><td>'+fmt(tonyBono)+'</td><td><strong>'+fmt(tonyTot)+'</strong></td></tr>'+
     '</tbody></table>';
   if(turnos>0) h+='<div style="font-size:.75rem;color:var(--gris);margin-top:8px;padding:8px;background:var(--crema);border-radius:6px"><strong>Fechas:</strong> '+fechas+'</div>';
   ar_gId('tabla-nom').innerHTML=h;
@@ -5672,9 +5691,13 @@ function exportNomina(){
   var arr=getRegistros();
   if(mes) arr=arr.filter(function(r){ return r.fecha.startsWith(mes); });
   var dias=arr.length;
-  var angelTot=((parseFloat(ar_gId('nom-angel-dia').value)||62000)+(parseFloat(ar_gId('nom-angel-bono').value)||5000))*dias;
-  var tonyTot=(parseFloat(ar_gId('nom-tony-dia').value)||30000)*dias;
-  var csv='Empleado,Cargo,Turnos,Total\nÁngel,Operario,'+dias+','+angelTot+'\nTony,Supervisor,'+dias+','+tonyTot;
+  var angelSal=(parseFloat(ar_gId('nom-angel-dia').value)||62000)*dias;
+  var angelBono=(parseFloat(ar_gId('nom-angel-bono').value)||5000)*dias;
+  var angelTot=angelSal+angelBono;
+  var tonySal=(parseFloat(ar_gId('nom-tony-dia').value)||30000)*dias;
+  var tonyBono=(parseFloat(ar_gId('nom-tony-bono').value)||0)*dias;
+  var tonyTot=tonySal+tonyBono;
+  var csv='Empleado,Cargo,Turnos,Salario base,Bono,Total\nÁngel,Operario,'+dias+','+angelSal+','+angelBono+','+angelTot+'\nTony,Supervisor,'+dias+','+tonySal+','+tonyBono+','+tonyTot;
   var blob='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
   var w=window.open('','_blank');
   if(w){ w.document.write('<html><head><meta charset="UTF-8"><title>Nómina CSV</title></head><body style="font-family:sans-serif;padding:16px"><h3>📥 Nómina Arequipe</h3><p style="color:#666;font-size:.85rem">Toca el enlace → compartir → Guardar en Archivos</p><a href="'+blob+'" download="nomina_arequipe.csv" style="background:#2A6B4A;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin-top:8px">📥 nomina_arequipe.csv</a></body></html>'); w.document.close(); }
@@ -5786,11 +5809,11 @@ function aplicarScan(){
   tab('registro',null);
   buildInsumosForm();
   var d=ar_scanData;
-  if(d.fecha) ar_gId('r-fecha').value=d.fecha;
+  if(d.fecha) ar_gId('r-fecha').value=ar_normFecha(d.fecha);
   if(d.tipo_producto) ar_gId('r-tipo').value=d.tipo_producto;
   if(d.lote) ar_gId('r-lote').value=d.lote;
-  if(d.fecha_vencimiento1) ar_gId('r-vence1').value=d.fecha_vencimiento1;
-  if(d.fecha_vencimiento2) ar_gId('r-vence2').value=d.fecha_vencimiento2;
+  if(d.fecha_vencimiento1) ar_gId('r-vence1').value=ar_normFecha(d.fecha_vencimiento1);
+  if(d.fecha_vencimiento2) ar_gId('r-vence2').value=ar_normFecha(d.fecha_vencimiento2);
   if(d.gas_inicial!=null) ar_gId('r-gas-ini').value=d.gas_inicial;
   if(d.gas_final!=null) ar_gId('r-gas-fin').value=d.gas_final;
   if(d.hora_inicio) ar_gId('r-hora-ini').value=d.hora_inicio;
@@ -5943,6 +5966,12 @@ function inv_calcPreview(){
   ar_gId('inv-pre-cpm').textContent=fmt(cpmNuevo)+'/'+u;
   ar_gId('inv-preview').style.display=cant>0?'block':'none';
 }
+function inv_abrirCompraBodega(){
+  var id=ar_gId('inv-ins-sel').value;
+  if(!id){ ar_showAlert('al-inv','⚠ Selecciona un insumo','err'); return; }
+  if(typeof DMBodega==='undefined'||!DMBodega.comprar){ ar_showAlert('al-inv','⚠ No se pudo abrir la pantalla de compra','err'); return; }
+  DMBodega.comprar('arequipe', id);
+}
 function inv_registrarCompra(){
   var id=ar_gId('inv-ins-sel').value; var fecha=ar_gId('ar-inv-fecha').value;
   var cant=parseFloat(ar_gId('ar-inv-cant').value)||0; var costoUnit=parseFloat(ar_gId('ar-inv-costo').value)||0;
@@ -5999,42 +6028,42 @@ function inv_descontarConsumo(reg){
 }
 function inv_render(){
   var stock=inv_getStock(); var p=getPrecios(); var kpiValor=0;
-  var h='<table><thead><tr><th>Insumo</th><th>Unidad</th><th>Stock actual</th><th>Costo prom.</th><th>Valor total</th><th>Mínimo</th><th>Estado</th></tr></thead><tbody>';
-  h+='<tr style="background:var(--cafe);color:var(--crema)"><td colspan="7" style="padding:6px 10px;font-size:.72rem;font-weight:700;text-transform:uppercase">Materias primas</td></tr>';
+  var h='<table><thead><tr><th>Insumo</th><th>Stock actual</th><th>Mínimo</th><th>Costo prom.</th><th>Valor total</th></tr></thead><tbody>';
+  h+='<tr style="background:var(--cafe);color:var(--crema)"><td colspan="5" style="padding:6px 10px;font-size:.72rem;font-weight:700;text-transform:uppercase">Materias primas</td></tr>';
   INSUMOS_DEF.forEach(function(ins){
     var s=stock[ins.id]; var cant=s?s.cantActual:0; var cpm=s?s.costoPromedio:(p[ins.id]||ins.precio); var min=s?s.minimo:0;
-    var tieneHistorial=s!==undefined;
     kpiValor+=Math.max(0,cant)*cpm; // solo suma positivos al valor
-    var estado;
-    if(cant<0) estado='<span style="color:var(--rojo);font-weight:700">⛔ Negativo</span>';
-    else if(cant===0&&tieneHistorial) estado='<span style="color:var(--rojo);font-weight:700">❌ Agotado</span>';
-    else if(min>0&&cant<=min) estado='<span style="color:#7a4800;font-weight:700">⚠ Bajo mínimo</span>';
-    else if(cant>0) estado='<span style="color:var(--verde);font-weight:600">✓ OK</span>';
-    else estado='<span style="color:var(--gris)">Sin datos</span>';
+    var dot=cant<=0?'🔴':(min>0&&cant<=min?'🟡':'🟢');
     var cantTxt=cant<0?'<strong style="color:var(--rojo)">'+fmtN(Math.round(cant*10)/10)+'</strong>':
                 cant===0?'<strong style="color:var(--rojo)">0</strong>':
                 fmtN(Math.round(cant*10)/10);
-    h+='<tr'+(cant<0?' style="background:#fde0dc"':'')+'><td><strong>'+inv_nombreIns(ins.id)+'</strong></td><td>'+ins.unidad+'</td><td style="font-weight:600">'+cantTxt+'</td><td>'+fmt(cpm)+'</td><td style="font-weight:600;color:'+(cant<0?'var(--rojo)':'var(--verde)')+'">'+fmt(Math.abs(cant)*cpm)+(cant<0?' (deuda)':'')+'</td><td>'+(min>0?fmtN(min):'—')+'</td><td>'+estado+'</td></tr>';
+    h+='<tr'+(cant<0?' style="background:#fde0dc"':'')+'><td>'+dot+' <strong>'+inv_nombreIns(ins.id)+'</strong></td><td style="font-weight:600">'+cantTxt+' '+ins.unidad+'</td><td>'+(min>0?fmtN(min)+' '+ins.unidad:'—')+' <button onclick="inv_editarMinimo(\''+ins.id+'\')" style="background:none;border:none;cursor:pointer;font-size:11px;padding:0">✏️</button></td><td>'+fmt(cpm)+'</td><td style="font-weight:600;color:'+(cant<0?'var(--rojo)':'var(--verde)')+'">'+fmt(Math.abs(cant)*cpm)+(cant<0?' (deuda)':'')+'</td></tr>';
   });
-  h+='<tr style="background:var(--cafe2);color:var(--crema)"><td colspan="7" style="padding:6px 10px;font-size:.72rem;font-weight:700;text-transform:uppercase">Empaques y adhesivos</td></tr>';
+  h+='<tr style="background:var(--cafe2);color:var(--crema)"><td colspan="5" style="padding:6px 10px;font-size:.72rem;font-weight:700;text-transform:uppercase">Empaques y adhesivos</td></tr>';
   EMPAQUES_DEF.forEach(function(e){
     var s=stock[e.id]; var cant=s?s.cantActual:0; var cpm=s?s.costoPromedio:(p[e.id]||e.precio); var min=s?s.minimo:0;
-    var tieneHistorial=s!==undefined;
     kpiValor+=Math.max(0,cant)*cpm;
-    var estado;
-    if(cant<0) estado='<span style="color:var(--rojo);font-weight:700">⛔ Negativo</span>';
-    else if(cant===0&&tieneHistorial) estado='<span style="color:var(--rojo);font-weight:700">❌ Agotado</span>';
-    else if(min>0&&cant<=min) estado='<span style="color:#7a4800;font-weight:700">⚠ Bajo mínimo</span>';
-    else if(cant>0) estado='<span style="color:var(--verde);font-weight:600">✓ OK</span>';
-    else estado='<span style="color:var(--gris)">Sin datos</span>';
+    var dot=cant<=0?'🔴':(min>0&&cant<=min?'🟡':'🟢');
     var cantTxt=cant<0?'<strong style="color:var(--rojo)">'+fmtN(Math.round(cant))+'</strong>':
                 cant===0?'<strong style="color:var(--rojo)">0</strong>':
                 fmtN(Math.round(cant));
-    h+='<tr'+(cant<0?' style="background:#fde0dc"':'')+'><td><strong>'+e.nombre+'</strong></td><td>'+e.unidad+'</td><td style="font-weight:600">'+cantTxt+'</td><td>'+fmt(cpm)+'</td><td style="font-weight:600;color:'+(cant<0?'var(--rojo)':'var(--verde)')+'">'+fmt(Math.abs(cant)*cpm)+(cant<0?' (deuda)':'')+'</td><td>'+(min>0?fmtN(min):'—')+'</td><td>'+estado+'</td></tr>';
+    h+='<tr'+(cant<0?' style="background:#fde0dc"':'')+'><td>'+dot+' <strong>'+e.nombre+'</strong></td><td style="font-weight:600">'+cantTxt+' '+e.unidad+'</td><td>'+(min>0?fmtN(min)+' '+e.unidad:'—')+' <button onclick="inv_editarMinimo(\''+e.id+'\')" style="background:none;border:none;cursor:pointer;font-size:11px;padding:0">✏️</button></td><td>'+fmt(cpm)+'</td><td style="font-weight:600;color:'+(cant<0?'var(--rojo)':'var(--verde)')+'">'+fmt(Math.abs(cant)*cpm)+(cant<0?' (deuda)':'')+'</td></tr>';
   });
-  h+='</tbody></table>';
+  h+='</tbody></table><p style="font-size:.72rem;color:var(--gris);margin-top:6px">🔴 Sin stock · 🟡 En mínimo · 🟢 OK</p>';
   if(ar_gId('tabla-inv')) ar_gId('tabla-inv').innerHTML=h;
   if(ar_gId('kpi-inv')) ar_gId('kpi-inv').innerHTML='<div class="kpi destacado"><div class="val">'+fmt(kpiValor)+'</div><div class="lbl">Valor total inventario</div></div>';
+}
+function inv_editarMinimo(id){
+  var stock=inv_getStock();
+  var s=stock[id]||{cantActual:0,costoPromedio:0,minimo:0};
+  var nuevo=prompt('Stock mínimo de alerta ('+inv_unidadIns(id)+'):', s.minimo||0);
+  if(nuevo===null) return;
+  var n=parseFloat(nuevo);
+  if(isNaN(n)||n<0){ alert('Valor inválido'); return; }
+  stock[id]=stock[id]||{cantActual:0,costoPromedio:0,minimo:0};
+  stock[id].minimo=n;
+  inv_saveStock(stock);
+  inv_render();
 }
 function inv_renderHistorial(){
   var mov=inv_getMov(); var filtro=ar_gId('inv-hist-ins')?ar_gId('inv-hist-ins').value:'';
@@ -6140,22 +6169,38 @@ function nom_renderPeriodos(){
   var ad=parseFloat(ar_gId('nom-angel-dia')?ar_gId('nom-angel-dia').value:62000)||62000;
   var ab=parseFloat(ar_gId('nom-angel-bono')?ar_gId('nom-angel-bono').value:5000)||5000;
   var td=parseFloat(ar_gId('nom-tony-dia')?ar_gId('nom-tony-dia').value:30000)||30000;
-  var aTot=(ad+ab)*turnos; var tTot=td*turnos; var total=aTot+tTot;
-  var res='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:.82rem">'+
-    '<div><div style="color:var(--gris);font-size:.72rem">Ángel</div><div style="font-weight:700">'+fmt(aTot)+'</div></div>'+
-    '<div><div style="color:var(--gris);font-size:.72rem">Tony</div><div style="font-weight:700">'+fmt(tTot)+'</div></div>'+
-    '<div><div style="color:var(--gris);font-size:.72rem">Total período</div><div style="font-weight:700;color:var(--caramelo)">'+fmt(total)+'</div></div></div>';
+  var tb=parseFloat(ar_gId('nom-tony-bono')?ar_gId('nom-tony-bono').value:0)||0;
+  var aSalTot=ad*turnos, aBonoTot=ab*turnos, aTot=aSalTot+aBonoTot;
+  var tSalTot=td*turnos, tBonoTot=tb*turnos, tTot=tSalTot+tBonoTot;
+  var total=aTot+tTot;
+  var res='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'+
+    '<div style="background:#fff;border-radius:8px;padding:8px 10px">'+
+      '<div style="font-size:.72rem;font-weight:700;color:var(--gris);text-transform:uppercase">Ángel · Operario</div>'+
+      '<div style="margin-top:4px">Salario: <strong>'+fmt(aSalTot)+'</strong></div>'+
+      '<div>Bono: <strong>'+fmt(aBonoTot)+'</strong></div>'+
+      '<div style="margin-top:2px;color:var(--caramelo);font-weight:700">Total: '+fmt(aTot)+'</div>'+
+    '</div>'+
+    '<div style="background:#fff;border-radius:8px;padding:8px 10px">'+
+      '<div style="font-size:.72rem;font-weight:700;color:var(--gris);text-transform:uppercase">Tony · Supervisor</div>'+
+      '<div style="margin-top:4px">Salario: <strong>'+fmt(tSalTot)+'</strong></div>'+
+      '<div>Bono: <strong>'+fmt(tBonoTot)+'</strong></div>'+
+      '<div style="margin-top:2px;color:var(--caramelo);font-weight:700">Total: '+fmt(tTot)+'</div>'+
+    '</div>'+
+    '<div style="grid-column:1/-1;text-align:right;font-size:.9rem;font-weight:700;color:var(--verde)">Total período: '+fmt(total)+'</div>'+
+    '</div>';
   if(ar_gId('nom-per-resumen')) ar_gId('nom-per-resumen').innerHTML=res;
   var periodos=nom_getPeriodos(); var histDiv=ar_gId('nom-hist-periodos'); if(!histDiv) return;
   if(!periodos.length){ histDiv.innerHTML='<div class="empty"><div class="ei">📅</div><p>Sin períodos liquidados.</p></div>'; return; }
   var hh='';
   periodos.forEach(function(p,i){
+    var angelLbl = p.angelBono!==undefined ? ('Ángel: '+fmt(p.angelSal)+' + '+fmt(p.angelBono)+' bono = '+fmt(p.angel)) : ('Ángel: '+fmt(p.angel));
+    var tonyLbl = p.tonyBono!==undefined ? ('Tony: '+fmt(p.tonySal)+' + '+fmt(p.tonyBono)+' bono = '+fmt(p.tony)) : ('Tony: '+fmt(p.tony));
     hh+='<div class="periodo-card pagado">'+
       '<div><div style="font-size:.72rem;color:var(--gris);text-transform:uppercase">Período '+(periodos.length-i)+'</div>'+
       '<div style="font-weight:700;color:var(--cafe)">'+p.fechaIni+' → '+p.fechaFin+'</div>'+
       '<div style="font-size:.78rem;color:var(--gris)">'+p.turnos+' turnos · Pagado: '+p.fechaPago+'</div></div>'+
-      '<div style="text-align:right"><div style="font-size:.72rem;color:var(--gris)">Ángel: '+fmt(p.angel)+'</div>'+
-      '<div style="font-size:.72rem;color:var(--gris)">Tony: '+fmt(p.tony)+'</div>'+
+      '<div style="text-align:right"><div style="font-size:.72rem;color:var(--gris)">'+angelLbl+'</div>'+
+      '<div style="font-size:.72rem;color:var(--gris)">'+tonyLbl+'</div>'+
       '<div style="font-family:\'Playfair Display\',serif;font-size:1.1rem;color:var(--verde);font-weight:700">'+fmt(p.total)+'</div></div></div>';
   });
   histDiv.innerHTML=hh;
@@ -6168,9 +6213,11 @@ function nom_liquidarPeriodo(){
   var ad=parseFloat(ar_gId('nom-angel-dia')?ar_gId('nom-angel-dia').value:62000)||62000;
   var ab=parseFloat(ar_gId('nom-angel-bono')?ar_gId('nom-angel-bono').value:5000)||5000;
   var td=parseFloat(ar_gId('nom-tony-dia')?ar_gId('nom-tony-dia').value:30000)||30000;
-  var aTot=(ad+ab)*arr.length; var tTot=td*arr.length;
+  var tb=parseFloat(ar_gId('nom-tony-bono')?ar_gId('nom-tony-bono').value:0)||0;
+  var angelSal=ad*arr.length, angelBono=ab*arr.length, aTot=angelSal+angelBono;
+  var tonySal=td*arr.length, tonyBono=tb*arr.length, tTot=tonySal+tonyBono;
   var periodos=nom_getPeriodos();
-  periodos.unshift({id:Date.now(),fechaIni:per.ini,fechaFin:per.fin,turnos:arr.length,angel:aTot,tony:tTot,total:aTot+tTot,fechaPago:hoy()});
+  periodos.unshift({id:Date.now(),fechaIni:per.ini,fechaFin:per.fin,turnos:arr.length,angel:aTot,angelSal:angelSal,angelBono:angelBono,tony:tTot,tonySal:tonySal,tonyBono:tonyBono,total:aTot+tTot,fechaPago:hoy()});
   nom_savePeriodos(periodos);
   ar_showAlert('al-nom-per','✅ Período liquidado.');
   nom_renderPeriodos();
@@ -12124,6 +12171,12 @@ var DMNomina = (function () {
      se esté mirando Obleas, Arequipe o Ventas. */
   function abrirModal() {
     pintar();
+    try { if (window.DMPrestamos) DMPrestamos.pintar(); } catch (e) {}
+    try { if (typeof dmNomTab === 'function') dmNomTab('trabajado'); } catch (e) {}
+    try {
+      var pf = document.getElementById('dm-prest-fecha');
+      if (pf && !pf.value) pf.value = new Date().toISOString().slice(0, 10);
+    } catch (e) {}
     var m = document.getElementById('dm-modal-nomina');
     if (m) m.classList.add('on');
   }
@@ -16153,43 +16206,13 @@ var DMDemo = (function () {
         <button class="dm-btn ghost" onclick="DM.panel(false);DMTrabajadores.abrir()">👷 Quién está en nómina</button>
       </div>
 
-      <label>Nómina de producción</label>
-      <div id="dm-nomina-cuerpo"><div class="dm-nota">Calculando…</div></div>
+      <label>Nómina y préstamos</label>
       <div class="dm-nota">
-        El período arranca el día siguiente al último pago. Al pagar queda el
-        egreso en Finanzas como costo de producción y el conteo de turnos
-        vuelve a empezar.
-      </div>
-
-      <label>Préstamos a empleados</label>
-      <select id="dm-prest-emp"></select>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <div style="flex:1">
-          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Monto</div>
-          <input type="text" id="dm-prest-monto" inputmode="numeric" placeholder="0">
-        </div>
-        <div style="flex:1">
-          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Sale de</div>
-          <select id="dm-prest-cuenta"><option value="caja">Caja</option><option value="banco">Banco</option></select>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <div style="flex:1">
-          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Fecha</div>
-          <input type="date" id="dm-prest-fecha">
-        </div>
-        <div style="flex:1.4">
-          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Nota</div>
-          <input type="text" id="dm-prest-nota" placeholder="Opcional">
-        </div>
+        Se movieron al ícono 👷 Nómina de la barra de arriba, para no
+        repetir la misma información en dos sitios.
       </div>
       <div class="dm-row">
-        <button class="dm-btn prim" onclick="DMPrestamos.registrar()">💵 Registrar préstamo</button>
-      </div>
-      <div class="dm-nota" id="dm-prest-saldos">Calculando…</div>
-      <div class="dm-nota">
-        El préstamo sale de caja o banco y queda registrado en Finanzas.
-        La deuda se descuenta sola de la próxima nómina de esa persona.
+        <button class="dm-btn ghost" onclick="DM.panel(false);DMNomina.abrirModal()">👷 Abrir Nómina</button>
       </div>
 
       <label>Contar el inventario de bodega</label>
@@ -16301,7 +16324,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 12/09/2026 02:09</div>
+                margin-top:10px;opacity:.75">Versión del 12/09/2026 05:53</div>
   </div>
 </div>
 
@@ -16310,14 +16333,59 @@ var DMDemo = (function () {
      días y merece un solo toque: este modal vive en el shell (no dentro de
      ningún módulo), así que abre igual se esté mirando Obleas, Arequipe o
      Ventas. Pinta lo mismo que ya pintaba dentro de Ajustes — DMNomina.pintar
-     no cambió, solo aprendió a escribir aquí también. -->
+     no cambió, solo aprendió a escribir aquí también.
+
+     Dos pestañas adentro (antes eran dos bloques sueltos en Ajustes):
+     «Lo trabajado» (lo que ya pintaba DMNomina) y «Préstamos» (el cuadro
+     de registro de préstamos, que vivía en Ajustes y se repetía). -->
 <div id="dm-modal-nomina" onclick="if(event.target===this)DMNomina.cerrarModal()">
   <div class="dm-card">
     <h2>👷 Nómina</h2>
     <div class="dm-sub">Obleas y Arequipe, en un solo lugar.</div>
-    <div id="dm-nomina-cuerpo-modal"><div class="dm-nota">Calculando…</div></div>
+    <div class="dm-row" style="margin-bottom:10px">
+      <button class="dm-btn prim" id="dm-nom-tab-trabajado" onclick="dmNomTab('trabajado')" style="flex:1">📊 Lo trabajado</button>
+      <button class="dm-btn ghost" id="dm-nom-tab-prestamos" onclick="dmNomTab('prestamos')" style="flex:1">💵 Préstamos</button>
+    </div>
+
+    <div id="dm-nom-panel-trabajado">
+      <div id="dm-nomina-cuerpo-modal"><div class="dm-nota">Calculando…</div></div>
+    </div>
+
+    <div id="dm-nom-panel-prestamos" style="display:none">
+      <label style="margin-top:0">Registrar préstamo</label>
+      <select id="dm-prest-emp"></select>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Monto</div>
+          <input type="text" id="dm-prest-monto" inputmode="numeric" placeholder="0">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Sale de</div>
+          <select id="dm-prest-cuenta"><option value="caja">Caja</option><option value="banco">Banco</option></select>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <div style="flex:1">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Fecha</div>
+          <input type="date" id="dm-prest-fecha">
+        </div>
+        <div style="flex:1.4">
+          <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Nota</div>
+          <input type="text" id="dm-prest-nota" placeholder="Opcional">
+        </div>
+      </div>
+      <div class="dm-row">
+        <button class="dm-btn prim" onclick="DMPrestamos.registrar()">💵 Registrar préstamo</button>
+      </div>
+      <div class="dm-nota" id="dm-prest-saldos">Calculando…</div>
+      <div class="dm-nota">
+        El préstamo sale de caja o banco y queda registrado en Finanzas.
+        La deuda se descuenta sola de la próxima nómina de esa persona.
+      </div>
+    </div>
+
     <div class="dm-row">
-      <button class="dm-btn ghost" onclick="DMNomina.cerrarModal()">Cerrar</button>
+      <button class="dm-btn ghost" id="dm-nom-btn-cerrar" onclick="DMNomina.cerrarModal()">Cerrar</button>
     </div>
   </div>
 </div>
