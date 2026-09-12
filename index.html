@@ -278,8 +278,8 @@ body{
 #mod-obleas .psug{background:var(--gr3);border-radius:8px;padding:12px;text-align:center;margin-top:12px;border:1px solid var(--gr4)}
 #mod-obleas .psug-l{font-size:10px;color:var(--gr);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
 #mod-obleas .psug-v{font-size:26px;font-weight:700;color:var(--gr);font-family:"Playfair Display",serif}
-#mod-obleas .stat-g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-#mod-obleas .sc{background:var(--bg2);border-radius:8px;padding:12px}
+#mod-obleas .stat-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+#mod-obleas .sc{background:var(--blanco);border-radius:10px;padding:14px 12px;box-shadow:0 1px 4px rgba(0,0,0,.1);text-align:center;border-top:3px solid var(--gr)}
 #mod-obleas .sc-l{font-size:10px;color:var(--t2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
 #mod-obleas .sc-v{font-size:22px;font-weight:700;color:var(--t);line-height:1.1;font-family:"Playfair Display",serif}
 #mod-obleas .sc-u{font-size:11px;color:var(--t2);font-weight:400}
@@ -3474,14 +3474,14 @@ function calcMOporOps(ops){
   var usados=[];
   (ops||[]).forEach(function(nombre){
     if(!nombre)return;
-    var n=nombre.toLowerCase().trim();
-    // 1. Exacto
-    var found=WORKERS.find(function(w){return w.nombre.toLowerCase()===n;});
+    var n=limpiarNombre(nombre);
+    // 1. Exacto (sin tildes, para que "Benjamín" y "Benjamin" cuenten como la misma persona)
+    var found=WORKERS.find(function(w){return limpiarNombre(w.nombre)===n;});
     // 2. Prefijo, pero SOLO si apunta a una sola persona.
     //    Karolay y Karolina comparten cinco letras: adivinar los mezclaba.
     if(!found){
       var cand=WORKERS.filter(function(w){
-        var wn=w.nombre.toLowerCase();
+        var wn=limpiarNombre(w.nombre);
         return wn.indexOf(n)===0||n.indexOf(wn)===0;
       });
       if(cand.length===1) found=cand[0];
@@ -3685,14 +3685,14 @@ async function calcRep(){
   f.forEach(function(r){
     var paq=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
     [r.op1,r.op2,r.op3,r.op4,r.op5,r.op6,r.op7,r.op8].filter(Boolean).forEach(function(op){
-      var opL=(op||'').toLowerCase().trim();
+      var opL=limpiarNombre(op);
       var found=null;
       for(var wi=0;wi<WORKERS.length;wi++){
-        if(WORKERS[wi].nombre.toLowerCase()===opL){found=WORKERS[wi].nombre;break;}
+        if(limpiarNombre(WORKERS[wi].nombre)===opL){found=WORKERS[wi].nombre;break;}
       }
       if(!found){
         var candRep=WORKERS.filter(function(w){
-          var wn=w.nombre.toLowerCase();
+          var wn=limpiarNombre(w.nombre);
           return wn.indexOf(opL)===0||opL.indexOf(wn)===0;
         });
         if(candRep.length===1)found=candRep[0].nombre;
@@ -3977,6 +3977,7 @@ var WORKERS = [
   {nombre:'Carlos',   rol:'Masero',    maq:3},
 ];
 var DESCUENTO_BONO=5000;
+function limpiarNombre(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();}
 
 function getWorkerPago(nombre){
   const w=WORKERS.find(x=>x.nombre.toLowerCase()===nombre.toLowerCase());
@@ -4028,13 +4029,13 @@ async function ob_calcNomina(){
     resumen[w.nombre]={nombre:w.nombre,rol:w.rol,maq:w.maq,turnos:0,bruto:0,bono:0,neto:0,fechas:[]};
   });
   function matchWorker(op){
-    var opL=(op||'').toLowerCase().trim();
+    var opL=limpiarNombre(op);
     if(!opL)return null;
     for(var wi=0;wi<WORKERS.length;wi++){
-      if(WORKERS[wi].nombre.toLowerCase()===opL)return WORKERS[wi].nombre;
+      if(limpiarNombre(WORKERS[wi].nombre)===opL)return WORKERS[wi].nombre;
     }
     var cand=WORKERS.filter(function(w){
-      var wn=w.nombre.toLowerCase();
+      var wn=limpiarNombre(w.nombre);
       return wn.indexOf(opL)===0||opL.indexOf(wn)===0;
     });
     return cand.length===1?cand[0].nombre:null;
@@ -16367,7 +16368,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 12/09/2026 15:09</div>
+                margin-top:10px;opacity:.75">Versión del 12/09/2026 15:51</div>
   </div>
 </div>
 
