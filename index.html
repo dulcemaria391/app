@@ -107,24 +107,24 @@ body{
 .dm-mod.on{display:block}
 
 /* ── Panel de ajustes globales ─────────────────────────────────────────── */
-#dm-panel{
+#dm-panel,#dm-modal-nomina{
   position:fixed;inset:0;z-index:9500;
   background:rgba(20,10,4,.6);
   display:none;align-items:flex-start;justify-content:center;
   padding:calc(var(--dm-top) + 16px) 14px calc(24px + var(--dm-abajo));
   overflow-y:auto;
 }
-#dm-panel.on{display:flex}
-#dm-panel .dm-card{
+#dm-panel.on,#dm-modal-nomina.on{display:flex}
+#dm-panel .dm-card,#dm-modal-nomina .dm-card{
   background:var(--dm-blanco);border-radius:14px;
   width:100%;max-width:460px;padding:20px;
   box-shadow:0 18px 50px rgba(0,0,0,.4);
 }
-#dm-panel h2{
+#dm-panel h2,#dm-modal-nomina h2{
   font-family:'Playfair Display',Georgia,serif;
   font-size:19px;color:var(--dm-cafe);margin:0 0 4px;
 }
-#dm-panel .dm-sub{font-size:12.5px;color:var(--dm-gris);margin-bottom:16px;line-height:1.6}
+#dm-panel .dm-sub,#dm-modal-nomina .dm-sub{font-size:12.5px;color:var(--dm-gris);margin-bottom:16px;line-height:1.6}
 
 /* Los tres bloques plegables del panel. Antes eran trece secciones seguidas
    en una sola columna: habia que bajar mucho para llegar a lo de abajo, y la
@@ -158,16 +158,16 @@ body{
   color:var(--dm-cafe);
 }
 #dm-panel input:focus{outline:none;border-color:var(--dm-caramelo);background:#fff}
-#dm-panel .dm-btn{
+#dm-panel .dm-btn,#dm-modal-nomina .dm-btn{
   display:inline-flex;align-items:center;justify-content:center;gap:6px;
   padding:11px 16px;border-radius:9px;border:none;cursor:pointer;
   font-family:inherit;font-size:13.5px;font-weight:600;
 }
-#dm-panel .dm-btn.prim{background:var(--dm-caramelo);color:#fff}
-#dm-panel .dm-btn.ghost{background:var(--dm-crema2);color:var(--dm-cafe)}
-#dm-panel .dm-row{display:flex;gap:8px;margin-top:18px}
-#dm-panel .dm-row .dm-btn{flex:1}
-#dm-panel .dm-nota{
+#dm-panel .dm-btn.prim,#dm-modal-nomina .dm-btn.prim{background:var(--dm-caramelo);color:#fff}
+#dm-panel .dm-btn.ghost,#dm-modal-nomina .dm-btn.ghost{background:var(--dm-crema2);color:var(--dm-cafe)}
+#dm-panel .dm-row,#dm-modal-nomina .dm-row{display:flex;gap:8px;margin-top:18px}
+#dm-panel .dm-row .dm-btn,#dm-modal-nomina .dm-row .dm-btn{flex:1}
+#dm-panel .dm-nota,#dm-modal-nomina .dm-nota{
   margin-top:14px;padding:11px 13px;border-radius:9px;
   background:var(--dm-crema2);font-size:12px;line-height:1.65;color:var(--dm-gris);
 }
@@ -188,16 +188,13 @@ body{
 <style>
 /* ===== CSS MODULO: OBLEAS ===== */
 #mod-obleas, #mod-obleas *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-#mod-obleas{--gr:#e65c00;--gr2:#f97316;--gr3:#fff7ed;--gr4:#fed7aa;--am:#b8860b;--am2:#fff8e1;--rd:#c62828;--rd2:#fef0f0;--bg:#fff;--bg2:#fafaf8;--bd:#e8e0d8;--t:#1a1a1a;--t2:#666660;--t3:#999}
-@media (prefers-color-scheme:dark){
- #mod-obleas{--bg:#1a1a1a;--bg2:#242424;--bd:#333;--t:#f0f0ec;--t2:#aaa;--t3:#666;--gr3:#2d1500;--gr4:#4a2000;--am2:#2a1f00;--rd2:#2a0a0a}
-}
-#mod-obleas{height:100%;font-family:system-ui,sans-serif;font-size:14px;background:var(--bg);color:var(--t)}
-#mod-obleas .app{display:flex;flex-direction:column;height:100vh;max-width:600px;margin:0 auto;background:var(--bg);overflow:hidden}
-#mod-obleas .hdr{background:linear-gradient(135deg,var(--gr),var(--gr2));color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
-#mod-obleas .hdr-t{font-size:15px;font-weight:600}
+#mod-obleas{--cafe:#2C1A0E;--cafe2:#4A2C1A;--caramelo:#C87533;--miel:#E8A84C;--dorado:#F0C060;--crema:#FBF0DC;--crema2:#F5E6C8;--blanco:#FFFDF8;--gris:#8A7060;--gris2:#C8B89A;--verde:#2A6B4A;--rojo:#B03020;--gr:var(--caramelo);--gr2:var(--miel);--gr3:var(--crema);--gr4:var(--crema2);--am:var(--caramelo);--am2:var(--crema2);--rd:var(--rojo);--rd2:#fde0dc;--bg:var(--blanco);--bg2:var(--crema);--bd:var(--gris2);--t:var(--cafe);--t2:var(--gris);--t3:rgba(138,112,96,.7)}
+#mod-obleas{height:100%;font-family:"Barlow",sans-serif;font-size:14px;background:var(--bg);color:var(--t)}
+#mod-obleas .app{display:flex;flex-direction:column;height:100vh;max-width:600px;margin:0 auto;background:var(--crema);overflow:hidden}
+#mod-obleas .hdr{background:linear-gradient(135deg,var(--cafe),var(--cafe2));color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+#mod-obleas .hdr-t{font-size:15px;font-weight:600;font-family:"Playfair Display",serif}
 #mod-obleas .hdr-s{font-size:11px;opacity:.7;margin-top:1px}
-#mod-obleas .nav{display:grid;grid-template-columns:repeat(9,1fr);background:var(--bg);border-top:2px solid var(--gr4);flex-shrink:0;z-index:100;-webkit-overflow-scrolling:touch}
+#mod-obleas .nav{display:grid;grid-template-columns:repeat(8,1fr);background:var(--bg);border-top:2px solid var(--gr4);flex-shrink:0;z-index:100;-webkit-overflow-scrolling:touch}
 #mod-obleas .nav::-webkit-scrollbar{display:none}
 #mod-obleas .nb{padding:6px 2px 4px;border:none;background:none;font-size:9px;font-weight:500;cursor:pointer;color:var(--t2);display:flex;flex-direction:column;align-items:center;gap:2px;white-space:nowrap;border-top:2.5px solid transparent;font-family:inherit;min-width:0;width:100%}
 #mod-obleas .nb .nb-ico{font-size:20px;line-height:1}
@@ -277,14 +274,14 @@ body{
 #mod-obleas .cost-val{font-size:13px;font-weight:700}
 #mod-obleas .cost-tot{display:flex;justify-content:space-between;padding:12px 0 4px;border-top:2px solid var(--gr);margin-top:4px}
 #mod-obleas .cost-tot .cost-lbl{font-weight:700;color:var(--gr);font-size:14px}
-#mod-obleas .cost-tot .cost-val{font-size:22px;font-weight:700;color:var(--gr)}
+#mod-obleas .cost-tot .cost-val{font-size:22px;font-weight:700;color:var(--gr);font-family:"Playfair Display",serif}
 #mod-obleas .psug{background:var(--gr3);border-radius:8px;padding:12px;text-align:center;margin-top:12px;border:1px solid var(--gr4)}
 #mod-obleas .psug-l{font-size:10px;color:var(--gr);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px;font-weight:700}
-#mod-obleas .psug-v{font-size:26px;font-weight:700;color:var(--gr)}
+#mod-obleas .psug-v{font-size:26px;font-weight:700;color:var(--gr);font-family:"Playfair Display",serif}
 #mod-obleas .stat-g{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
 #mod-obleas .sc{background:var(--bg2);border-radius:8px;padding:12px}
 #mod-obleas .sc-l{font-size:10px;color:var(--t2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
-#mod-obleas .sc-v{font-size:22px;font-weight:700;color:var(--t);line-height:1.1}
+#mod-obleas .sc-v{font-size:22px;font-weight:700;color:var(--t);line-height:1.1;font-family:"Playfair Display",serif}
 #mod-obleas .sc-u{font-size:11px;color:var(--t2);font-weight:400}
 #mod-obleas .chart-c{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
 #mod-obleas .ct{font-size:11px;font-weight:700;color:var(--t);margin-bottom:12px;text-transform:uppercase;letter-spacing:.4px}
@@ -295,7 +292,7 @@ body{
 #mod-obleas .bfill.am{background:var(--am)}
 #mod-obleas .bval{font-size:11px;color:var(--t2);width:42px;flex-shrink:0;text-align:right}
 #mod-obleas .empty{text-align:center;padding:48px 20px;color:var(--t2);font-size:14px;line-height:1.8}
-#mod-obleas .hint{background:var(--am2);border:1px solid #f0c040;border-radius:8px;padding:10px 12px;font-size:12px;color:var(--am);line-height:1.5;margin-bottom:12px}
+#mod-obleas .hint{background:var(--am2);border:1px solid var(--gr2);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--am);line-height:1.5;margin-bottom:12px}
 #mod-obleas .lb{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:999;align-items:center;justify-content:center}
 #mod-obleas .lb.open{display:flex}
 #mod-obleas .lb img{max-width:95vw;max-height:90vh;border-radius:10px;object-fit:contain}
@@ -317,20 +314,33 @@ body{
   --verde:#2A6B4A;--rojo:#B03020;
   --sombra:0 4px 20px rgba(44,26,14,.12);--r:12px;}
 #mod-arequipe, #mod-arequipe *{box-sizing:border-box;margin:0;padding:0}
-#mod-arequipe{font-family:"Barlow",sans-serif;background:var(--crema);color:var(--cafe);min-height:100vh;font-size:15px}
+#mod-arequipe{font-family:"Barlow",sans-serif;background:var(--crema);color:var(--cafe);min-height:100vh;font-size:15px;padding-bottom:70px}
 #mod-arequipe header{background:linear-gradient(135deg,var(--cafe),var(--cafe2));color:var(--crema);padding:14px 20px;
   display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:200;box-shadow:0 3px 20px rgba(0,0,0,.3)}
 #mod-arequipe .logo{width:38px;height:38px;background:var(--caramelo);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0}
 #mod-arequipe header h1{font-family:"Playfair Display",serif;font-size:1.2rem;line-height:1.1}
 #mod-arequipe header h1 span{display:block;font-family:"Barlow",sans-serif;font-size:.68rem;font-weight:400;opacity:.6;letter-spacing:.08em;text-transform:uppercase}
 #mod-arequipe #fecha-hoy{margin-left:auto;font-size:.72rem;opacity:.55;text-align:right;white-space:nowrap}
-#mod-arequipe nav{background:var(--cafe2);display:flex;gap:2px;padding:0 14px 10px;overflow-x:auto;scrollbar-width:none}
-#mod-arequipe nav::-webkit-scrollbar{display:none}
-#mod-arequipe nav button{background:transparent;border:none;color:rgba(251,240,220,.55);font-family:"Barlow",sans-serif;
+#mod-arequipe nav.top{background:var(--cafe2);display:flex;gap:2px;padding:0 14px 10px;overflow-x:auto;scrollbar-width:none;position:sticky;top:68px;z-index:190}
+#mod-arequipe nav.top::-webkit-scrollbar{display:none}
+#mod-arequipe nav.top button{background:transparent;border:none;color:rgba(251,240,220,.55);font-family:"Barlow",sans-serif;
   font-size:.78rem;font-weight:500;padding:7px 13px;border-radius:20px;cursor:pointer;white-space:nowrap;transition:all .2s}
-#mod-arequipe nav button.activo{background:var(--caramelo);color:#fff;font-weight:600}
-#mod-arequipe nav button:hover:not(.activo){background:rgba(255,255,255,.1);color:var(--crema)}
+#mod-arequipe nav.top button.activo{background:var(--caramelo);color:#fff;font-weight:600}
+#mod-arequipe nav.top button:hover:not(.activo){background:rgba(255,255,255,.1);color:var(--crema)}
+#mod-arequipe nav.bottom{display:none}
 #mod-arequipe main{max-width:980px;margin:0 auto;padding:20px 14px 40px}
+@media (max-width:760px){
+ #mod-arequipe nav.top{display:none}
+ #mod-arequipe nav.bottom{display:flex;position:fixed;bottom:0;left:0;right:0;background:var(--cafe);z-index:200;
+    box-shadow:0 -3px 20px rgba(0,0,0,.3);padding:6px 2px;justify-content:flex-start;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+ #mod-arequipe nav.bottom::-webkit-scrollbar{display:none}
+ #mod-arequipe nav.bottom button{background:transparent;border:none;color:rgba(251,240,220,.85);display:flex;flex-direction:column;
+    align-items:center;gap:2px;font-size:.62rem;font-family:"Barlow",sans-serif;padding:5px 6px;cursor:pointer;font-weight:600;
+    flex:0 0 auto;min-width:60px}
+ #mod-arequipe nav.bottom button .ic{font-size:1.3rem}
+ #mod-arequipe nav.bottom button.activo{color:var(--dorado);font-weight:700}
+}
 #mod-arequipe .sec{display:none}
 #mod-arequipe .sec.activo{display:block}
 #mod-arequipe .card{background:var(--blanco);border-radius:var(--r);box-shadow:var(--sombra);padding:20px;margin-bottom:18px}
@@ -404,6 +414,14 @@ body{
 #mod-arequipe .spin{display:none;width:28px;height:28px;border:3px solid var(--gris2);border-top-color:var(--caramelo);
   border-radius:50%;animation:ar_giro .8s linear infinite;margin:14px auto}
 @keyframes ar_giro{to{transform:rotate(360deg)}}
+#mod-arequipe .progress-wrap{display:none;margin-top:12px}
+#mod-arequipe .progress-bar{background:var(--gris2);border-radius:20px;height:8px;overflow:hidden}
+#mod-arequipe .progress-fill{background:var(--caramelo);height:100%;width:0%;transition:width .3s ease;border-radius:20px}
+#mod-arequipe .progress-txt{font-size:.75rem;color:var(--gris);text-align:center;margin-top:6px}
+#mod-arequipe .ai-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+#mod-arequipe .ai-field{background:#fff;border-radius:8px;padding:8px 10px}
+#mod-arequipe .ai-field-l{font-size:.68rem;color:var(--gris);text-transform:uppercase}
+#mod-arequipe .ai-field-v{font-size:.86rem;font-weight:600;color:var(--cafe);margin-top:2px}
 #mod-arequipe .alert{padding:10px 14px;border-radius:8px;font-size:.82rem;margin-bottom:12px;display:none;font-weight:500}
 #mod-arequipe .alert.ok{background:#d4f0e0;color:#0a5c2a;border:1px solid #a8dfc0}
 #mod-arequipe .alert.err{background:#fde0dc;color:#7a1010;border:1px solid #f0b8b0}
@@ -622,12 +640,12 @@ body{
 
 /* Arequipe y Ventas: cabecera pegajosa debajo de la barra de modulos. */
 #mod-arequipe > header,#mod-ventas > header{top:var(--dm-top)!important}
-#mod-ventas nav.top{top:calc(var(--dm-top) + 68px)!important}
+#mod-arequipe nav.top,#mod-ventas nav.top{top:calc(var(--dm-top) + 68px)!important}
 #mod-arequipe,#mod-ventas{min-height:calc(100vh - var(--dm-top))!important}
 
-/* La nav inferior de Ventas es fija: no debe taparse con la de Obleas,
-   que solo existe cuando el modulo Obleas esta visible. */
-#mod-ventas nav.bottom{z-index:8000}
+/* La nav inferior de Arequipe y Ventas es fija: no debe taparse con la de
+   Obleas, que solo existe cuando el modulo Obleas esta visible. */
+#mod-arequipe nav.bottom,#mod-ventas nav.bottom{z-index:8000}
 
 /* El lightbox de Obleas y los modales de Ventas quedan bajo el panel global. */
 #mod-obleas .lb{z-index:8500}
@@ -642,7 +660,7 @@ body{
 /* ── Abajo: la rayita de inicio del iPhone ──────────────────────────────────
    Agregada a la pantalla de inicio, la nav inferior de Ventas quedaba pegada
    al borde y los ultimos botones caian bajo la rayita de inicio. */
-#mod-ventas nav.bottom{padding-bottom:calc(6px + var(--dm-abajo))!important}
+#mod-arequipe nav.bottom,#mod-ventas nav.bottom{padding-bottom:calc(6px + var(--dm-abajo))!important}
 #toast-wrap{bottom:calc(74px + var(--dm-abajo))}
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -665,6 +683,7 @@ body{
    hacia gris.
    ══════════════════════════════════════════════════════════════════════════ */
 #mod-arequipe nav,
+#mod-arequipe nav.bottom,
 #mod-ventas nav.top,
 #mod-ventas nav.bottom{
   background-color:#4A2C1A;
@@ -691,6 +710,7 @@ body{
     <button class="dm-tab"    id="dm-tab-ventas"   onclick="DM.ir('ventas')"><span class="dm-ic">🧾</span>Ventas</button>
   </div>
   <div class="dm-right">
+    <button class="dm-icon-btn" onclick="DMNomina.abrirModal()" title="Nómina">👷</button>
     <button class="dm-icon-btn" onclick="DM.panel(true)" title="Ajustes generales">⚙️</button>
   </div>
 </div>
@@ -1185,7 +1205,6 @@ body{
   <button class="nb" onclick="pg('registros')" id="n-registros"><span class="nb-ico">📊</span>Registros</button>
   <button class="nb" onclick="pg('costos')" id="n-costos"><span class="nb-ico">🧮</span>Costos</button>
   <button class="nb" onclick="pg('reportes')" id="n-reportes"><span class="nb-ico">📈</span>Reportes</button>
-  <button class="nb" onclick="pg('nomina')" id="n-nomina"><span class="nb-ico">👷</span>Nómina</button>
   <button class="nb" onclick="pg('inventario')" id="n-inventario"><span class="nb-ico">📦</span>Invent.</button>
   <button class="nb" onclick="pg('config')" id="n-config"><span class="nb-ico">⚙️</span>Config</button>
 </nav>
@@ -1208,15 +1227,14 @@ body{
   <h1>Dulce María<span>Producción · Arequipe</span></h1>
   <div id="ar-fecha-hoy"></div>
 </header>
-<nav>
+<nav class="top">
   <button class="activo" onclick="tab('inicio',this)">🏠 Inicio</button>
   <button onclick="tab('escaneo',this)">📷 Escaneo IA</button>
-  <button onclick="tab('registro',this)">📋 Registro</button>
-  <button onclick="tab('costos',this)">💰 Costos</button>
+  <button onclick="tab('registro',this)">✏️ Manual</button>
+  <button onclick="tab('registros',this)">📑 Registros</button>
   <button onclick="tab('inventario',this)">📦 Inventario</button>
-  <button onclick="tab('productos',this)">🍯 Productos</button>
   <button onclick="tab('reportes',this)">📊 Reportes</button>
-  <button onclick="tab('nomina',this)">👷 Nómina</button>
+  <button onclick="tab('costoslote',this)">🧮 Costos</button>
   <button onclick="tab('config',this)">⚙️ Config</button>
 </nav>
 <main>
@@ -1245,9 +1263,13 @@ body{
       <img id="ar-prev-img" alt="Vista previa">
     </div>
     <div class="spin" id="ar-spin-scan"></div>
+    <div class="progress-wrap" id="progress-wrap-ar">
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill-ar"></div></div>
+      <div class="progress-txt" id="progress-txt-ar">Analizando...</div>
+    </div>
     <div class="ia-res" id="ia-res">
       <div style="font-weight:600;color:var(--verde);margin-bottom:8px">✅ Datos extraídos — revisa y aplica</div>
-      <pre id="ia-txt"></pre>
+      <div class="ai-fields" id="ia-fields"></div>
     </div>
     <div class="btn-row">
       <button class="btn btn-primary" onclick="ar_escanearIA()">🤖 Analizar con IA</button>
@@ -1342,6 +1364,10 @@ body{
       <button class="btn btn-ghost" onclick="limpiarForm()">🔄 Limpiar</button>
     </div>
   </div>
+</section>
+
+<!-- REGISTROS -->
+<section id="arsec-registros" class="sec">
   <div class="card">
     <div class="card-header" style="justify-content:space-between">
       <h2>📑 Registros guardados</h2>
@@ -1354,8 +1380,7 @@ body{
   </div>
 </section>
 
-<!-- COSTOS -->
-<section id="arsec-costos" class="sec">
+<section id="arsec-costos">
   <div class="card">
     <div class="card-header"><h2>💰 Precios de Insumos y Empaques</h2></div>
     <div class="sec-label">Insumos</div>
@@ -1407,8 +1432,20 @@ body{
 
 <!-- INVENTARIO -->
 <section id="arsec-inventario" class="sec">
+  <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto">
+    <button class="btn btn-primary btn-sm" id="itab-ar-stock" onclick="invTabAr('stock')">📦 Stock</button>
+    <button class="btn btn-ghost btn-sm" id="itab-ar-compra" onclick="invTabAr('compra')">🛒 Compra</button>
+    <button class="btn btn-ghost btn-sm" id="itab-ar-historial" onclick="invTabAr('historial')">📋 Historial</button>
+  </div>
+  <div id="itab-ar-stock-cont">
   <div id="inv-alertas"></div>
   <div class="kpi-grid" id="kpi-inv"></div>
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between"><h2>📦 Stock actual</h2><button class="btn btn-ghost btn-sm" onclick="inv_render()">🔄</button></div>
+    <div class="tw" id="tabla-inv"></div>
+  </div>
+  </div>
+  <div id="itab-ar-compra-cont" style="display:none">
   <div class="card">
     <div class="card-header"><h2>🛒 Registrar Compra</h2></div>
     <div class="alert" id="al-inv"></div>
@@ -1430,16 +1467,15 @@ body{
     </div>
     <div class="btn-row"><button class="btn btn-success" onclick="inv_registrarCompra()">✅ Registrar compra</button></div>
   </div>
-  <div class="card">
-    <div class="card-header" style="justify-content:space-between"><h2>📦 Stock actual</h2><button class="btn btn-ghost btn-sm" onclick="inv_render()">🔄</button></div>
-    <div class="tw" id="tabla-inv"></div>
   </div>
+  <div id="itab-ar-historial-cont" style="display:none">
   <div class="card">
     <div class="card-header" style="justify-content:space-between">
       <h2>📋 Historial de movimientos</h2>
       <select id="inv-hist-ins" style="max-width:200px;font-size:.8rem" onchange="inv_renderHistorial()"><option value="">Todos</option></select>
     </div>
     <div class="tw" id="tabla-inv-hist"></div>
+  </div>
   </div>
 </section>
 
@@ -1530,14 +1566,25 @@ body{
       </div>
       <div class="tw" id="tabla-rep"></div>
     </div>
-    <!-- DESGLOSE DE COSTOS POR LOTE -->
-    <div class="card" id="card-desglose" style="display:none">
-      <div class="card-header" style="justify-content:space-between">
-        <h2>🧾 Desglose de costos — <span id="desglose-titulo">Lote</span></h2>
-        <button class="btn btn-ghost btn-sm" onclick="ar_gId('card-desglose').style.display='none'">✕ Cerrar</button>
-      </div>
-      <div id="desglose-contenido"></div>
+  </div>
+</section>
+
+<!-- COSTOS -->
+<section id="arsec-costoslote" class="sec">
+  <div class="card">
+    <div class="card-header" style="justify-content:space-between">
+      <h2>🧮 Costos por lote</h2>
+      <input type="month" id="filtro-mes-costos" style="max-width:150px;font-size:.8rem" oninput="renderCostosLista()">
     </div>
+    <div class="tw" id="tabla-costos"></div>
+  </div>
+  <!-- DESGLOSE DE COSTOS POR LOTE -->
+  <div class="card" id="card-desglose" style="display:none">
+    <div class="card-header" style="justify-content:space-between">
+      <h2>🧾 Desglose de costos — <span id="desglose-titulo">Lote</span></h2>
+      <button class="btn btn-ghost btn-sm" onclick="ar_gId('card-desglose').style.display='none'">✕ Cerrar</button>
+    </div>
+    <div id="desglose-contenido"></div>
   </div>
 </section>
 
@@ -1671,6 +1718,17 @@ body{
 </section>
 </main>
 
+<nav class="bottom">
+  <button class="activo" onclick="tab('inicio',this)"><span class="ic">🏠</span>Inicio</button>
+  <button onclick="tab('escaneo',this)"><span class="ic">📷</span>Escanear</button>
+  <button onclick="tab('registro',this)"><span class="ic">✏️</span>Manual</button>
+  <button onclick="tab('registros',this)"><span class="ic">📑</span>Registros</button>
+  <button onclick="tab('inventario',this)"><span class="ic">📦</span>Invent.</button>
+  <button onclick="tab('reportes',this)"><span class="ic">📊</span>Reportes</button>
+  <button onclick="tab('costoslote',this)"><span class="ic">🧮</span>Costos</button>
+  <button onclick="tab('config',this)"><span class="ic">⚙️</span>Config</button>
+</nav>
+
 
 
 </div><!-- /mod-arequipe -->
@@ -1693,7 +1751,6 @@ body{
   <button onclick="irA('facturas',this)">🧾 Facturas</button>
   <button onclick="irA('clientes',this)">👥 Clientes</button>
   <button onclick="irA('inventario',this)">📦 Inventario</button>
-  <button onclick="irA('bodega',this)">🏬 Bodega</button>
   <button onclick="irA('reportes',this)">📊 Reportes</button>
   <button onclick="irA('finanzas',this)">💰 Finanzas</button>
   <button onclick="irA('caja',this)">💵 Caja</button>
@@ -1886,8 +1943,13 @@ body{
 
 <!-- ===================== INVENTARIO ===================== -->
 <section id="sec-inventario" class="sec">
+  <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto">
+    <button class="btn btn-primary btn-sm" id="invsub-terminado" onclick="invSub('terminado')">📦 Producto terminado</button>
+    <button class="btn btn-ghost btn-sm" id="invsub-insumos" onclick="invSub('insumos')">🏬 Insumos y compras</button>
+  </div>
+  <div id="invsub-terminado-cont">
   <div class="card">
-    <div class="card-header"><h2>📦 Inventario</h2>
+    <div class="card-header"><h2>📦 Producto terminado</h2>
       <div class="ch-actions">
         <button class="btn btn-ghost btn-sm" onclick="abrirEntradaStock()">➕ Entrada stock</button>
         <button class="btn btn-ghost btn-sm" onclick="exportarInventarioCSV()">⬇ CSV</button>
@@ -1900,11 +1962,13 @@ body{
     <div class="kpi-grid" id="kpi-inventario"></div>
     <div id="lista-inventario"></div>
   </div>
+  </div>
+  <div id="invsub-insumos-cont" style="display:none">
+    <div id="sec-bodega"></div>
+  </div>
 </section>
 
 <!-- ===================== REPORTES ===================== -->
-<section id="sec-bodega" class="sec"></section>
-
 <section id="sec-reportes" class="sec">
   <div class="kpi-grid" id="kpi-reportes"></div>
   <div style="margin-bottom:14px"><label>Mostrar</label>
@@ -2165,7 +2229,6 @@ body{
   <button onclick="irA('facturas',this)"><span class="ic">🧾</span>Facturas</button>
   <button onclick="irA('clientes',this)"><span class="ic">👥</span>Clientes</button>
   <button onclick="irA('inventario',this)"><span class="ic">📦</span>Stock</button>
-  <button onclick="irA('bodega',this)"><span class="ic">🏬</span>Bodega</button>
   <button onclick="irA('reportes',this)"><span class="ic">📊</span>Reportes</button>
   <button onclick="irA('finanzas',this)"><span class="ic">💰</span>Finanzas</button>
   <button onclick="irA('caja',this)"><span class="ic">💵</span>Caja</button>
@@ -3178,8 +3241,7 @@ async function ob_renderInicio(){
     var cb=(r.totC1||0)+(r.totC2||0)+(r.totC3||0);
     var pEq=p+cb*(20/50);
     var gPaq=pEq>0?Math.round((r.harTotal||0)/pEq*1000):0;
-    var ops=[r.op1,r.op2,r.op3,r.op4,r.op5].filter(Boolean);
-    var c=p?Math.round(calcCostoVal(p,r.harTotal||0,r.gasConsumo||0,r.maq1||0,r.maq2||0,r.maq3||0,ops,r.totC1||0,r.totC2||0,r.totC3||0)):0;
+    var c=p?Math.round(costoTurno(r)):0;
     return '<tr>'+
       '<td style="white-space:nowrap">'+ob_normFecha(r.fecha)+'</td>'+
       '<td>'+(r.totM1||0)+'</td><td>'+(r.totM2||0)+'</td><td>'+(r.totM3||0)+'</td>'+
@@ -3978,7 +4040,7 @@ async function ob_calcNomina(){
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:12px">'+
         '<div style="background:var(--bg);border-radius:6px;padding:6px;text-align:center"><div style="color:var(--t2);font-size:10px">Turnos</div><div style="font-weight:700">'+w.turnos+'</div></div>'+
         '<div style="background:var(--bg);border-radius:6px;padding:6px;text-align:center"><div style="color:var(--t2);font-size:10px">Bruto</div><div style="font-weight:700">'+fmt(w.bruto)+'</div></div>'+
-        '<div style="background:#fff8e1;border-radius:6px;padding:6px;text-align:center"><div style="color:var(--am);font-size:10px">Bono acum.</div><div style="font-weight:700;color:var(--am)">'+fmt(w.bono)+'</div></div>'+
+        '<div style="background:var(--am2);border-radius:6px;padding:6px;text-align:center"><div style="color:var(--am);font-size:10px">Bono acum.</div><div style="font-weight:700;color:var(--am)">'+fmt(w.bono)+'</div></div>'+
       '</div>'+
       '<div style="font-size:11px;color:var(--t3);margin-top:6px">Fechas: '+fdUnicas.join(', ')+'</div>'+
     '</div>';
@@ -4917,19 +4979,42 @@ function ar_showAlert(id,msg,tipo){
   setTimeout(function(){ el.style.display='none'; },4000);
 }
 
+function invTabAr(t){
+  ['stock','compra','historial'].forEach(function(x){
+    var cont=document.getElementById('itab-ar-'+x+'-cont');
+    var btn2=document.getElementById('itab-ar-'+x);
+    if(cont)cont.style.display=x===t?'block':'none';
+    if(btn2)btn2.className=x===t?'btn btn-primary btn-sm':'btn btn-ghost btn-sm';
+  });
+}
+(function(){
+  var precios=document.getElementById('arsec-'+'costos');
+  var cfg=document.getElementById('arsec-'+'config');
+  if(precios&&cfg){
+    var ultima=cfg.querySelector('.card:last-child');
+    if(ultima)cfg.insertBefore(precios,ultima);else cfg.appendChild(precios);
+  }
+})();
+var AR_ORDEN_NAV=['inicio','escaneo','registro','registros','inventario','reportes','costoslote','config'];
 function tab(id,btn){
   document.querySelectorAll('#mod-arequipe .sec').forEach(function(s){ s.classList.remove('activo'); });
-  document.querySelectorAll('#mod-arequipe nav button').forEach(function(b){ b.classList.remove('activo'); });
+  document.querySelectorAll('nav.top button').forEach(function(b){ b.classList.remove('activo'); });
+  document.querySelectorAll('nav.bottom button').forEach(function(b){ b.classList.remove('activo'); });
   ar_gId('arsec-'+id).classList.add('activo');
-  btn.classList.add('activo');
+  var arIdx=AR_ORDEN_NAV.indexOf(id);
+  if(arIdx>=0){
+    var arTb=document.querySelectorAll('nav.top button')[arIdx]; if(arTb)arTb.classList.add('activo');
+    var arBb=document.querySelectorAll('nav.bottom button')[arIdx]; if(arBb)arBb.classList.add('activo');
+  } else if(btn){ btn.classList.add('activo'); }
   if(id==='inicio')    ar_renderInicio();
-  if(id==='registro'){ buildInsumosForm(); renderTabla(); if(!ar_gId('r-fecha').value) ar_gId('r-fecha').value=hoy(); }
-  if(id==='costos')    buildPreciosTable();
-  if(id==='inventario'){ inv_buildSelects(); inv_render(); inv_renderHistorial(); inv_renderAlertas(); }
+  if(id==='registro'){ buildInsumosForm(); if(!ar_gId('r-fecha').value) ar_gId('r-fecha').value=hoy(); }
+  if(id==='registros') renderTabla();
+  if(id==='costoslote') renderCostosLista();
+  if(id==='inventario'){ inv_buildSelects(); inv_render(); inv_renderHistorial(); inv_renderAlertas(); invTabAr('stock'); }
   if(id==='productos') { prod_render(); prod_renderHist(); if(ar_gId('prod-fecha')&&!ar_gId('prod-fecha').value) ar_gId('prod-fecha').value=hoy(); }
   if(id==='reportes')  setDefDates();
   if(id==='nomina')    { ar_gId('nom-mes').value=hoy().slice(0,7); setTimeout(function(){ ar_calcNomina(); nom_renderPeriodos(); },100); }
-  if(id==='config')    ar_cargarConfig();
+  if(id==='config')    { ar_cargarConfig(); buildPreciosTable(); }
 }
 
 function getRegistros(){
@@ -5183,6 +5268,32 @@ function renderTabla(){
   });
   h+='</tbody></table>';
   wrap.innerHTML=h;
+}
+
+function renderCostosLista(){
+  var mesRaw=ar_gId('filtro-mes-costos')?ar_gId('filtro-mes-costos').value:'';
+  var mes=normMes(mesRaw);
+  var arr=getRegistros();
+  if(mes) arr=arr.filter(function(r){ return ar_normFecha(r.fecha).slice(0,7)===mes; });
+  arr=arr.slice().sort(function(a,b){ return ar_normFecha(b.fecha)<ar_normFecha(a.fecha)?1:-1; });
+  var wrap2=ar_gId('tabla-costos');
+  if(!wrap2) return;
+  if(!arr.length){
+    wrap2.innerHTML='<div class="empty"><div class="ei">🧮</div><p>Sin registros'+(mes?' en '+mes:'')+'.</p></div>';
+    return;
+  }
+  var h2='<table><thead><tr><th>Fecha</th><th>Lote</th><th>Vr gramo</th><th>Costo total</th><th></th></tr></thead><tbody>';
+  arr.forEach(function(r){
+    var vg=r.valorGramo||0;
+    h2+='<tr>'+
+      '<td>'+r.fecha+'</td>'+
+      '<td>'+(r.lote||'—')+'</td>'+
+      '<td><strong style="color:var(--caramelo)">'+(vg?fmt(vg):'—')+'</strong></td>'+
+      '<td><strong>'+(r.costos?fmt(r.costos.total):'—')+'</strong></td>'+
+      '<td><button class="btn btn-ghost btn-sm" onclick="verDesglose('+r.id+')" title="Ver desglose de costos">🧾</button></td></tr>';
+  });
+  h2+='</tbody></table>';
+  wrap2.innerHTML=h2;
 }
 
 function elimReg(id){
@@ -5584,6 +5695,7 @@ function ar_prevScan(input){
     URL.revokeObjectURL(url);
     ar_scanB64=dataUrl.split(',')[1];
     var prev=ar_gId('ar-prev-img'); prev.src=dataUrl; prev.style.display='block';
+    ar_escanearIA();
   };
   imgEl.src=url;
 }
@@ -5592,13 +5704,52 @@ function ar_limpiarScan(){
   ar_gId('ia-res').style.display='none'; ar_gId('btn-aplicar').style.display='none';
   ar_gId('ar-file-scan').value=''; ar_scanB64=''; ar_scanData=null;
 }
+var AR_PROG_IV=null;
+function arAnimProgress(){
+  var p=0, mi=0;
+  var fill=ar_gId('progress-fill-ar'), txt=ar_gId('progress-txt-ar');
+  var msgs=['Procesando imagen...','Leyendo la planilla...','Identificando el lote...','Extrayendo valores...'];
+  clearInterval(AR_PROG_IV);
+  AR_PROG_IV=setInterval(function(){
+    p+=Math.random()*8+2; if(p>92)p=92;
+    if(fill)fill.style.width=p+'%';
+    if(txt&&Math.random()>0.6){ mi=(mi+1)%msgs.length; txt.textContent=msgs[mi]; }
+  },350);
+}
+function mostrarResumenIA(d){
+  var cont=ar_gId('ia-fields'); if(!cont) return;
+  var prodTxt=[];
+  if(d.produccion){
+    if(d.produccion.tetero) prodTxt.push(d.produccion.tetero+' aplicador');
+    if(d.produccion.bolsa) prodTxt.push(d.produccion.bolsa+' bolsa');
+    if(d.produccion.tarrina) prodTxt.push(d.produccion.tarrina+' tarrina');
+  }
+  var insumosN=0;
+  if(d.insumos){ Object.keys(d.insumos).forEach(function(k){ if(Number(d.insumos[k])>0) insumosN++; }); }
+  var vence=[d.fecha_vencimiento1,d.fecha_vencimiento2].filter(Boolean).join(' / ');
+  var horario=(d.hora_inicio||d.hora_fin)?((d.hora_inicio||'—')+' – '+(d.hora_fin||'—')):'—';
+  var gasCons=(d.gas_final!=null&&d.gas_inicial!=null)?(d.gas_final-d.gas_inicial).toFixed(1)+' m³':'—';
+  cont.innerHTML=
+    '<div class="ai-field"><div class="ai-field-l">Fecha</div><div class="ai-field-v">'+(d.fecha||'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Producto</div><div class="ai-field-v">'+(d.tipo_producto||'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Lote</div><div class="ai-field-v">'+(d.lote||'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Vence</div><div class="ai-field-v">'+(vence||'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Horario</div><div class="ai-field-v">'+horario+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Gas consumido</div><div class="ai-field-v">'+gasCons+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Brix</div><div class="ai-field-v">'+((d.brix!=null&&d.brix!=='')?d.brix:'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Producción</div><div class="ai-field-v">'+(prodTxt.length?prodTxt.join(' · '):'—')+'</div></div>'+
+    '<div class="ai-field"><div class="ai-field-l">Insumos leídos</div><div class="ai-field-v">'+insumosN+'</div></div>';
+}
 function ar_escanearIA(){
   var key=localStorage.getItem('dm_apikey')||'';
   if(!key){ ar_showAlert('ar-al-scan','⚠ Configura tu clave API en ⚙️ Config','err'); return; }
   if(!ar_scanB64){ ar_showAlert('ar-al-scan','⚠ Primero selecciona la foto','err'); return; }
-  ar_gId('ar-spin-scan').style.display='block';
   ar_gId('ia-res').style.display='none';
   ar_gId('btn-aplicar').style.display='none';
+  ar_gId('progress-wrap-ar').style.display='block';
+  ar_gId('progress-fill-ar').style.width='0%';
+  ar_gId('progress-txt-ar').textContent='Analizando...';
+  arAnimProgress();
   var insumosList=INSUMOS_DEF.map(function(i){ return '"'+i.id+'": 0'; }).join(',\n    ');
   var prompt='Analiza la imagen del formato FR-PRO-AR-01 de producción de arequipe.\nExtrae TODOS los datos visibles y devuelve ÚNICAMENTE un JSON con esta estructura exacta (null si no se ve):\n{\n  "fecha": "YYYY-MM-DD",\n  "tipo_producto": "",\n  "lote": "",\n  "fecha_vencimiento1": "YYYY-MM-DD",\n  "fecha_vencimiento2": "YYYY-MM-DD",\n  "gas_inicial": 0,\n  "gas_final": 0,\n  "hora_inicio": "HH:MM",\n  "hora_fin": "HH:MM",\n  "brix": 0,\n  "insumos": {\n    '+insumosList+'\n  },\n  "produccion": {\n    "tetero": 0,\n    "bolsa": 0,\n    "tarrina": 0\n  },\n  "observaciones": ""\n}\nREGLAS CRITICAS:\n- "tetero" = cantidad de Arequipe Aplicadores x 400gr (el campo del MEDIO en produccion del lote)\n- "bolsa" = cantidad de Arequipe Bolsas x 500gr (el campo de la IZQUIERDA en produccion del lote)\n- "tarrina" = cantidad de Arequipe tarrinas x 220gr (el campo de la DERECHA en produccion del lote)\n- El campo "nata" corresponde al campo "fos" o "nata" del formato fisico.\n- Lee con cuidado el encabezado de cada columna antes de asignar el numero.\nResponde SOLO con el JSON, sin texto adicional, sin markdown.';
   var body=JSON.stringify({model:'claude-opus-4-5',max_tokens:2000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:ar_scanB64}},{type:'text',text:prompt}]}]});
@@ -5613,7 +5764,10 @@ function ar_escanearIA(){
       var match=txt.match(/\{[\s\S]*\}/);
       if(!match) throw new Error('La IA no pudo leer la planilla. Intenta con mejor iluminación.');
       ar_scanData=JSON.parse(match[0]);
-      ar_gId('ia-txt').textContent=JSON.stringify(ar_scanData,null,2);
+      clearInterval(AR_PROG_IV);
+      ar_gId('progress-fill-ar').style.width='100%';
+      ar_gId('progress-txt-ar').textContent='¡Listo!';
+      mostrarResumenIA(ar_scanData);
       ar_gId('ia-res').style.display='block';
       ar_gId('btn-aplicar').style.display='inline-flex';
     });
@@ -5624,15 +5778,12 @@ function ar_escanearIA(){
     return fetch('https://corsproxy.io/?https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},body:body})
     .then(procesarResp);
   })
-  .catch(function(e){ ar_showAlert('ar-al-scan','❌ Error IA: '+e.message,'err'); })
-  .finally(function(){ ar_gId('ar-spin-scan').style.display='none'; });
+  .catch(function(e){ clearInterval(AR_PROG_IV); ar_showAlert('ar-al-scan','❌ Error IA: '+e.message,'err'); })
+  .finally(function(){ ar_gId('ar-spin-scan').style.display='none'; var w=ar_gId('progress-wrap-ar'); if(w)setTimeout(function(){w.style.display='none';},600); });
 }
 function aplicarScan(){
   if(!ar_scanData) return;
-  document.querySelectorAll('#mod-arequipe .sec').forEach(function(s){ s.classList.remove('activo'); });
-  document.querySelectorAll('#mod-arequipe nav button').forEach(function(b){ b.classList.remove('activo'); });
-  ar_gId('arsec-registro').classList.add('activo');
-  document.querySelectorAll('#mod-arequipe nav button')[2].classList.add('activo');
+  tab('registro',null);
   buildInsumosForm();
   var d=ar_scanData;
   if(d.fecha) ar_gId('r-fecha').value=d.fecha;
@@ -6165,6 +6316,7 @@ function prod_renderHist(){
 
 /* ===== DESGLOSE DETALLADO DE COSTOS POR LOTE ===== */
 function verDesglose(id){
+  tab('costoslote',null);
   var arr=getRegistros();
   var r=arr.filter(function(x){ return x.id===id; })[0];
   if(!r){ return; }
@@ -8382,6 +8534,19 @@ function exportarFinanzasCSV(){
 
 
 var SEC_ACTUAL='inicio';
+var INV_SUB_ACTUAL='terminado';
+function invSub(cual){
+  INV_SUB_ACTUAL=cual;
+  var esInsumos=(cual==='insumos');
+  var terminado=document.getElementById('invsub-terminado-cont');
+  var insumos=document.getElementById('invsub-insumos-cont');
+  var bT=document.getElementById('invsub-terminado');
+  var bI=document.getElementById('invsub-insumos');
+  if(terminado)terminado.style.display=esInsumos?'none':'';
+  if(insumos)insumos.style.display=esInsumos?'':'none';
+  if(bT)bT.className=esInsumos?'btn btn-ghost btn-sm':'btn btn-primary btn-sm';
+  if(bI)bI.className=esInsumos?'btn btn-primary btn-sm':'btn btn-ghost btn-sm';
+}
 function irA(sec,btn){
   SEC_ACTUAL=sec;
   document.querySelectorAll('#mod-ventas .sec').forEach(function(s){ s.classList.remove('activo'); });
@@ -8389,17 +8554,17 @@ function irA(sec,btn){
   document.querySelectorAll('#mod-ventas nav.top button').forEach(function(b){ b.classList.remove('activo'); });
   document.querySelectorAll('#mod-ventas nav.bottom button').forEach(function(b){ b.classList.remove('activo'); });
   /* marcar activos en ambos navs por el orden */
-  var orden=['inicio','escaneo','facturas','clientes','inventario','bodega','reportes','finanzas','caja','gastos','resumen','cierres','config'];
+  var orden=['inicio','escaneo','facturas','clientes','inventario','reportes','finanzas','caja','gastos','resumen','cierres','config'];
   var idx=orden.indexOf(sec);
   if(idx>=0){ var tb=document.querySelectorAll('#mod-ventas nav.top button')[idx]; if(tb)tb.classList.add('activo');
-    var ordenBot=['inicio','escaneo','facturas','clientes','inventario','bodega','reportes','finanzas','caja','gastos','resumen','cierres','config'];
+    var ordenBot=['inicio','escaneo','facturas','clientes','inventario','reportes','finanzas','caja','gastos','resumen','cierres','config'];
     var ib=ordenBot.indexOf(sec); if(ib>=0){ var bb=document.querySelectorAll('#mod-ventas nav.bottom button')[ib]; if(bb){ bb.classList.add('activo'); if(bb.scrollIntoView)try{bb.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'});}catch(e){} } } }
   window.scrollTo({top:0,behavior:'smooth'});
   /* render bajo demanda */
   if(sec==='inicio')vt_renderInicio();
   else if(sec==='facturas')renderFacturas();
   else if(sec==='clientes')renderClientes();
-  else if(sec==='inventario')renderInventario();
+  else if(sec==='inventario'){renderInventario();invSub(INV_SUB_ACTUAL);}
   else if(sec==='reportes')renderReportes();
   else if(sec==='finanzas')renderFinanzas();
   else if(sec==='caja')renderCaja();
@@ -11902,9 +12067,18 @@ var DMNomina = (function () {
     alert(msg);
   }
 
-  /* ── Tarjeta de nómina en el panel general ───────────────────────────── */
-  function pintar() {
-    var caja = document.getElementById('dm-nomina-cuerpo');
+  /* ── Tarjeta de nómina ────────────────────────────────────────────────
+     Se pinta en dos sitios: la de siempre, dentro del panel de Ajustes
+     (dm-nomina-cuerpo), y la del ícono propio en la barra de arriba
+     (dm-nomina-cuerpo-modal). Sin argumento se repintan los dos que existan
+     en el DOM, así "Pagar y reiniciar conteo" queda al día se toque desde
+     donde se toque. */
+  function pintar(contId) {
+    var ids = contId ? [contId] : ['dm-nomina-cuerpo', 'dm-nomina-cuerpo-modal'];
+    ids.forEach(function (id) { pintarEn(id); });
+  }
+  function pintarEn(contId) {
+    var caja = document.getElementById(contId);
     if (!caja) return;
     var html = '';
     Object.keys(LINEAS).forEach(function (linea) {
@@ -11943,9 +12117,25 @@ var DMNomina = (function () {
     caja.innerHTML = html;
   }
 
+  /* ── Ícono propio en la barra de arriba ───────────────────────────────
+     Nómina se usa cada 12 días y hasta ahora había que abrir Ajustes y
+     bajar para llegar. Este modal es independiente del panel de Ajustes
+     (vive en el shell, no dentro de ningún módulo), así que funciona igual
+     se esté mirando Obleas, Arequipe o Ventas. */
+  function abrirModal() {
+    pintar();
+    var m = document.getElementById('dm-modal-nomina');
+    if (m) m.classList.add('on');
+  }
+  function cerrarModal() {
+    var m = document.getElementById('dm-modal-nomina');
+    if (m) m.classList.remove('on');
+  }
+
   return {
     calcular: calcular, liquidar: liquidar, periodo: periodo,
-    cortes: cortes, guardarCorte: guardarCorte, pintar: pintar, LINEAS: LINEAS
+    cortes: cortes, guardarCorte: guardarCorte, pintar: pintar, LINEAS: LINEAS,
+    abrirModal: abrirModal, cerrarModal: cerrarModal
   };
 })();
 
@@ -13871,10 +14061,14 @@ var DMBodega = (function () {
         : '');
   }
 
-  /* ¿El usuario esta parado en la pestana de Bodega? */
+  /* ¿El usuario esta parado en la pestana de Bodega?
+     Bodega ya no es su propia seccion: vive como sub-pestana "insumos"
+     dentro de Inventario (ver invSub() en ventas.html), asi que se mira si
+     ese contenedor esta visible en vez de buscar una clase "activo". */
   function enPestanaAhora() {
     var s = document.getElementById('sec-bodega');
-    return !!(s && s.className && s.className.indexOf('activo') >= 0);
+    var cont = document.getElementById('invsub-insumos-cont');
+    return !!(s && cont && cont.style.display !== 'none');
   }
 
   /* ── La pestana propia, dentro de Ventas ─────────────────────────────── */
@@ -14291,18 +14485,41 @@ var DMBodega = (function () {
                    '</strong> por debajo del mínimo.</span>' : ' Ninguno bajo el mínimo.');
   }
 
-  /* Que irA('bodega') pinte la pestana. El modulo de Ventas no sabe de ella. */
+  /* Que invSub('insumos') pinte la pestana. El modulo de Ventas no sabe de
+     ella: invSub solo mueve CSS, y aqui se engancha para que ademas repinte
+     los datos. Bodega dejo de ser su propia seccion (irA('bodega')) para
+     pasar a ser la sub-pestana "insumos" dentro de Inventario — ver invSub()
+     en ventas.html —, asi que tambien se engancha irA: si el usuario vuelve
+     a Inventario con la sub-pestana de insumos ya abierta, se refresca sin
+     que haga falta tocar el sub-boton de nuevo. */
   function engancharNavegacion() {
-    if (typeof window.irA !== 'function' || window.irA._dmBodega) return false;
-    var previo = window.irA;
-    var nuevo = function (sec, btn) {
-      var r = previo.apply(this, arguments);
-      if (sec === 'bodega') { try { pestana(false); } catch (e) { console.warn('DMBodega:', e); } }
-      return r;
-    };
-    nuevo._dmBodega = true;
-    window.irA = nuevo;
-    return true;
+    var listo = true;
+
+    if (typeof window.invSub === 'function' && !window.invSub._dmBodega) {
+      var previoSub = window.invSub;
+      var nuevoSub = function (cual) {
+        var r = previoSub.apply(this, arguments);
+        if (cual === 'insumos') { try { pestana(false); } catch (e) { console.warn('DMBodega:', e); } }
+        return r;
+      };
+      nuevoSub._dmBodega = true;
+      window.invSub = nuevoSub;
+    } else if (typeof window.invSub !== 'function') { listo = false; }
+
+    if (typeof window.irA === 'function' && !window.irA._dmBodega) {
+      var previoIrA = window.irA;
+      var nuevoIrA = function (sec, btn) {
+        var r = previoIrA.apply(this, arguments);
+        if (sec === 'inventario' && enPestanaAhora()) {
+          try { pestana(false); } catch (e) { console.warn('DMBodega:', e); }
+        }
+        return r;
+      };
+      nuevoIrA._dmBodega = true;
+      window.irA = nuevoIrA;
+    } else if (typeof window.irA !== 'function') { listo = false; }
+
+    return listo;
   }
 
   function arrancar(intentos) {
@@ -16084,7 +16301,24 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 11/09/2026 15:05</div>
+                margin-top:10px;opacity:.75">Versión del 12/09/2026 02:09</div>
+  </div>
+</div>
+
+<!-- ══════════ NÓMINA · ícono propio en la barra ══════════
+     Antes solo se llegaba entrando primero a Ajustes. Nómina se usa cada 12
+     días y merece un solo toque: este modal vive en el shell (no dentro de
+     ningún módulo), así que abre igual se esté mirando Obleas, Arequipe o
+     Ventas. Pinta lo mismo que ya pintaba dentro de Ajustes — DMNomina.pintar
+     no cambió, solo aprendió a escribir aquí también. -->
+<div id="dm-modal-nomina" onclick="if(event.target===this)DMNomina.cerrarModal()">
+  <div class="dm-card">
+    <h2>👷 Nómina</h2>
+    <div class="dm-sub">Obleas y Arequipe, en un solo lugar.</div>
+    <div id="dm-nomina-cuerpo-modal"><div class="dm-nota">Calculando…</div></div>
+    <div class="dm-row">
+      <button class="dm-btn ghost" onclick="DMNomina.cerrarModal()">Cerrar</button>
+    </div>
   </div>
 </div>
 
