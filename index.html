@@ -1141,6 +1141,7 @@ body{
 
 <!-- TAB STOCK -->
 <div id="itab-stock-cont">
+  <div class="kpi-grid" id="kpi-inv-ob" style="grid-template-columns:1fr;margin-bottom:10px"></div>
   <div class="sec">
     <div class="stit">📦 Estado del inventario</div>
     <div id="inv-tabla"></div>
@@ -3704,26 +3705,57 @@ async function calcRep(){
   var maqBars=[['Máquina 1',pM1],['Máquina 2',pM2],['Máquina 3',pM3]].map(function(x){
     return '<div class="barrow"><div class="blbl">'+x[0]+'</div><div class="btrack"><div class="bfill" style="width:'+Math.round(x[1]/maxM*100)+'%"></div></div><div class="bval">'+x[1].toLocaleString('es-CO')+'</div></div>';
   }).join('');
-  var opBars=Object.keys(porOp).sort(function(a,b){return porOp[b]-porOp[a];}).slice(0,6).map(function(op){
+  var opBars=Object.keys(porOp).sort(function(a,b){return porOp[b]-porOp[a];}).map(function(op){
     return '<div class="barrow"><div class="blbl">'+op.split(' ')[0]+'</div><div class="btrack"><div class="bfill am" style="width:'+Math.round(porOp[op]/maxOp*100)+'%"></div></div><div class="bval">'+porOp[op].toLocaleString('es-CO')+'</div></div>';
   }).join('');
   var combosBars=totCombos>0?'<div class="chart-c"><div class="ct">Combos por máquina</div>'+
     [['Máquina 1',cM1],['Máquina 2',cM2],['Máquina 3',cM3]].map(function(x){
       return '<div class="barrow"><div class="blbl">'+x[0]+'</div><div class="btrack"><div class="bfill" style="width:'+Math.round(x[1]/maxC*100)+'%"></div></div><div class="bval">'+x[1].toLocaleString('es-CO')+'</div></div>';
     }).join('')+'</div>':'';
+  var filasTurno=f.slice().sort(function(a,b){
+    return ob_normFecha(b.fecha).localeCompare(ob_normFecha(a.fecha))||((b.ts||'').localeCompare(a.ts||''));
+  }).map(function(r){
+    var p=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
+    var ops=[r.op1,r.op2,r.op3,r.op4,r.op5,r.op6,r.op7,r.op8].filter(Boolean);
+    var maq=[r.maq1?'M1':'',r.maq2?'M2':'',r.maq3?'M3':''].filter(Boolean).join('+');
+    var cUnit=p?calcCostoVal(p,r.harTotal||0,r.gasConsumo||0,r.maq1||0,r.maq2||0,r.maq3||0,ops,r.totC1||0,r.totC2||0,r.totC3||0):0;
+    var cTotTurno=cUnit*p;
+    return '<tr>'+
+      '<td style="white-space:nowrap">'+ob_normFecha(r.fecha)+'</td>'+
+      '<td>'+(r.lote||'—')+'</td>'+
+      '<td style="max-width:130px;white-space:normal;font-size:11px">'+(ops.join(', ')||'—')+'</td>'+
+      '<td>'+(r.totM1||0)+'</td><td>'+(r.totM2||0)+'</td><td>'+(r.totM3||0)+'</td>'+
+      '<td style="font-weight:700">'+p+'</td>'+
+      '<td>'+((r.harTotal||0).toFixed(1))+'</td>'+
+      '<td>'+((r.gasConsumo||0).toFixed(2))+'</td>'+
+      '<td>'+(maq||'—')+'</td>'+
+      '<td>'+fmt(cUnit)+'</td>'+
+      '<td style="font-weight:700;color:var(--gr)">'+fmt(cTotTurno)+'</td>'+
+      '<td style="max-width:110px;white-space:normal;font-size:11px;color:var(--t2)">'+(r.obs||'—')+'</td>'+
+    '</tr>';
+  }).join('');
+  var tablaTurnos='<div class="sec" style="margin-top:12px">'+
+    '<div class="stit">📋 Detalle por turno</div>'+
+    '<div class="twrap"><table class="rt" style="min-width:820px"><thead><tr>'+
+    '<th>Fecha</th><th>Lote</th><th>Operario(s)</th><th>M1</th><th>M2</th><th>M3</th><th>Total</th>'+
+    '<th>Harina kg</th><th>Gas m³</th><th>Máq</th><th>Costo/paq</th><th>Costo total</th><th>Obs.</th>'+
+    '</tr></thead><tbody>'+filasTurno+'</tbody></table></div>'+
+    '</div>';
   cont.innerHTML=
     '<div class="stat-g">'+
     '<div class="sc"><div class="sc-l">Total paquetes</div><div class="sc-v">'+totPaq.toLocaleString('es-CO')+'<span class="sc-u"> paq</span></div></div>'+
     '<div class="sc"><div class="sc-l">Harina consumida</div><div class="sc-v">'+totHar.toFixed(1)+'<span class="sc-u"> kg</span></div></div>'+
     '<div class="sc"><div class="sc-l">Gas consumido</div><div class="sc-v">'+totGas.toFixed(1)+'<span class="sc-u"> m³</span></div></div>'+
     '<div class="sc"><div class="sc-l">Costo prom/paq</div><div class="sc-v">'+fmt(costProm)+'</div></div>'+
+    '<div class="sc"><div class="sc-l">Precio sugerido (+30%)</div><div class="sc-v">'+fmt(costProm*1.3)+'</div></div>'+
     '<div class="sc"><div class="sc-l">Harina/paquete</div><div class="sc-v">'+(paqEqTotal?((totHar/paqEqTotal)*1000).toFixed(0):0)+'<span class="sc-u"> g</span></div></div>'+
     '<div class="sc"><div class="sc-l">Turnos</div><div class="sc-v">'+f.length+'</div></div>'+
     '<div class="sc"><div class="sc-l">Total combos</div><div class="sc-v">'+totCombos.toLocaleString('es-CO')+'<span class="sc-u"> u</span></div></div>'+
     '</div>'+
     '<div class="chart-c"><div class="ct">Obleas por máquina</div>'+maqBars+'</div>'+
     combosBars+
-    '<div class="chart-c"><div class="ct">Producción por operario</div>'+opBars+'</div>';
+    '<div class="chart-c"><div class="ct">Producción por operario</div>'+opBars+'</div>'+
+    tablaTurnos;
   var rb=document.getElementById('repBtns');if(rb)rb.style.display='flex';
 }
 
@@ -4219,10 +4251,10 @@ function renderInvStock(){
     '<div class="twrap"><table class="rt"><thead><tr>'+
     '<th>Insumo</th><th>Stock</th><th>M\u00edn</th><th>Costo prom</th><th>Valor total</th><th></th>'+
     '</tr></thead><tbody>'+rows.join('')+'</tbody>'+
-    '<tfoot><tr style="background:var(--gr3)"><td colspan="4" style="font-weight:700;color:var(--gr);padding:8px">VALOR TOTAL INVENTARIO</td>'+
-    '<td style="font-weight:700;font-size:15px;color:var(--gr)">'+fmt(totalValor)+'</td><td></td></tr></tfoot>'+
     '</table></div>'+
-    '<p style="font-size:11px;color:var(--t2);margin-top:6px">\uD83D\uDD34 Sin stock \u00B7 \uD83D\uDFE1 En m\u00ednimo \u00B7 \uD83D\uDFE2 OK \u00B7 \uD83D\uDCCB Toca nombre o 📋 para ver Kardex</p>';
+    '<p style="font-size:11px;color:var(--t2);margin-top:6px">🔴 Sin stock · 🟡 En mínimo · 🟢 OK · 📋 Toca nombre o 📋 para ver Kardex</p>';
+  if(document.getElementById('kpi-inv-ob')) document.getElementById('kpi-inv-ob').innerHTML=
+    '<div class="kpi" style="text-align:center;border-left:4px solid var(--gr)"><div class="kpi-l">Valor total inventario</div><div class="kpi-v" style="font-size:26px;color:var(--gr)">'+fmt(totalValor)+'</div></div>';
 }
 
 
@@ -12148,12 +12180,23 @@ var DMNomina = (function () {
               (r.periodo.desdeCorte ? '' : ' · sin corte previo')) +
         '</div>' +
         (r.gente.length
-          ? '<div style="font-size:11.5px;color:var(--dm-gris);margin-top:6px;line-height:1.7">' +
+          ? '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11.5px">' +
+            '<thead><tr style="color:var(--dm-gris)">' +
+              '<th style="text-align:left;padding:3px 6px 5px 0;font-weight:600">Empleado</th>' +
+              '<th style="text-align:center;padding:3px 6px 5px;font-weight:600">Turnos</th>' +
+              '<th style="text-align:right;padding:3px 6px 5px;font-weight:600">Bono</th>' +
+              '<th style="text-align:right;padding:3px 6px 5px;font-weight:600">Préstamo</th>' +
+              '<th style="text-align:right;padding:3px 0 5px 6px;font-weight:600">Total</th>' +
+            '</tr></thead><tbody>' +
             r.gente.map(function (w) {
-              return w.nombre + ' · ' + w.turnos + ' turnos · ' + pesos2(w.aPagar != null ? w.aPagar : w.neto) +
-                (w.bono ? ' <span style="color:#B8860B">(bono ' + pesos2(w.bono) + ')</span>' : '') +
-                (w.descuento > 0 ? ' <span style="color:#B03020">(−' + pesos2(w.descuento) + ' préstamo)</span>' : '');
-            }).join('<br>') + '</div>'
+              return '<tr style="border-top:1px solid var(--dm-crema2)">' +
+                '<td style="padding:5px 6px 5px 0">' + w.nombre + '</td>' +
+                '<td style="padding:5px 6px;text-align:center">' + w.turnos + '</td>' +
+                '<td style="padding:5px 6px;text-align:right;color:#B8860B">' + (w.bono ? pesos2(w.bono) : '—') + '</td>' +
+                '<td style="padding:5px 6px;text-align:right;color:#B03020">' + (w.descuento > 0 ? '−' + pesos2(w.descuento) : '—') + '</td>' +
+                '<td style="padding:5px 0 5px 6px;text-align:right;font-weight:700">' + pesos2(w.aPagar != null ? w.aPagar : w.neto) + '</td>' +
+              '</tr>';
+            }).join('') + '</tbody></table>'
           : '<div style="font-size:11.5px;color:var(--dm-gris);margin-top:6px">Sin turnos por pagar.</div>') +
         (r.turnos
           ? '<button class="dm-btn prim" style="margin-top:10px;width:100%" ' +
@@ -16324,7 +16367,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 12/09/2026 05:53</div>
+                margin-top:10px;opacity:.75">Versión del 12/09/2026 15:09</div>
   </div>
 </div>
 
