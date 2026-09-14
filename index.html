@@ -7668,6 +7668,7 @@ function verProducto(key){
       '<button class="btn btn-ghost btn-sm" onclick="guardarMinimo(\''+esc(key).replace(/'/g,"\\'")+'\')">Guardar</button></div>'+
       '<div class="sec-label">Movimientos</div>'+rows+
       '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="abrirEntradaStock(\''+esc(key).replace(/'/g,"\\'")+'\')">➕ Entrada</button>'+
+      '<button class="btn btn-ghost btn-sm" onclick="abrirCorregirStock(\''+esc(key).replace(/'/g,"\\'")+'\')">🛠 Corregir stock</button>'+
       '<button class="btn btn-danger btn-sm" onclick="eliminarProducto(\''+esc(key).replace(/'/g,"\\'")+'\')">🗑 Eliminar</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cerrar</button></div>';
     abrirModal(html);
@@ -7718,6 +7719,38 @@ function eliminarProducto(key){
       toast('No se pudo eliminar: '+(e&&e.message?e.message:'error'),'err');
     });
   });
+}
+function abrirCorregirStock(key){
+  var i=CACHE_INV.find(function(x){return x.key===key;}); if(!i)return;
+  var actual=Number(i.stock)||0;
+  var html='<h3>🛠 Corregir stock</h3>'+
+    '<p style="font-size:.86rem;margin-bottom:10px">Usa esto solo cuando el número de <strong>'+esc(i.nombre||i.key)+'</strong> quedó mal por algún error (un registro viejo que se borró sin descontarse, un conteo distinto al del sistema, etc.) — no para una compra ni una venta normal, esas ya se descuentan solas. Escribe el número que de verdad hay; la diferencia queda anotada en el historial de este producto.</p>'+
+    '<div class="sec-label">Stock actual: '+actual+'</div>'+
+    '<div><label>Stock correcto</label><input type="number" id="cs-nuevo" value="'+actual+'"></div>'+
+    '<div style="margin-top:10px"><label>Motivo (opcional, queda en el historial)</label><input type="text" id="cs-nota" placeholder="Ej: sobrante de un registro que se había borrado sin descontarse"></div>'+
+    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-primary btn-sm" onclick="confirmarCorregirStock(\''+esc(key).replace(/'/g,"\\'")+'\')">Guardar corrección</button>'+
+    '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>';
+  abrirModal(html);
+}
+function confirmarCorregirStock(key){
+  var nuevo=Number(vt_gId('cs-nuevo').value);
+  if(!isFinite(nuevo)){ toast('Escribe un número válido','err'); return; }
+  var nota=(vt_gId('cs-nota').value||'').trim();
+  dbGet(STORE_INVENTARIO,key).then(function(i){
+    if(!i)return;
+    var actual=Number(i.stock)||0;
+    var dif=nuevo-actual;
+    if(dif===0){ toast('El stock ya está en ese número','warn'); cerrarModal(); return; }
+    i.stock=nuevo;
+    var ps=[dbPut(STORE_INVENTARIO,i)];
+    ps.push(dbPut(STORE_MOVS,{
+      id:uid(), prodKey:key, tipo:dif>0?'entrada':'salida', cantidad:Math.abs(dif),
+      fecha:hoyISO(), ref:'Corrección manual'+(nota?(': '+nota):'')+' ('+actual+' → '+nuevo+')', ts:Date.now()
+    }));
+    return Promise.all(ps);
+  }).then(function(){
+    toast('Stock corregido: '+nuevo,'ok'); cerrarModal(); refrescarTodo();
+  }).catch(function(e){ toast('No se pudo corregir: '+(e&&e.message?e.message:'error'),'err'); });
 }
 function guardarMinimo(key){
   var v=Number(vt_gId('edit-min').value)||0;
@@ -16483,7 +16516,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 14/09/2026 15:27</div>
+                margin-top:10px;opacity:.75">Versión del 14/09/2026 16:26</div>
   </div>
 </div>
 
