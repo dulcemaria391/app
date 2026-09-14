@@ -877,6 +877,7 @@ body{
 <!-- MANUAL -->
 <div class="pg" id="pg-manual">
 <div id="alrt-manual" class="alrt"></div>
+<div id="edit-banner" class="alrt alrt-info" style="display:none"><span id="edit-banner-txt"></span> <button type="button" onclick="cancelarEdicion()" class="btn bs" style="margin-left:8px;padding:4px 10px;font-size:11px;display:inline-flex">&#10006; Cancelar edici&oacute;n</button></div>
 <div class="sec">
   <div class="stit">📅 Datos generales</div>
   <div class="f"><label>Fecha</label><input type="date" id="e-fecha"></div>
@@ -949,7 +950,7 @@ body{
   <div id="chklist"></div>
 </div>
 <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-  <button class="btn bp btn-full" onclick="guardarManual()">💾 Guardar turno completo</button>
+  <button class="btn bp btn-full" id="btn-guardar-turno" onclick="guardarManual()">💾 Guardar turno completo</button>
   <button class="btn bs btn-full" onclick="limpiarManual()">🗑 Limpiar</button>
 </div>
 </div>
@@ -2625,6 +2626,7 @@ function dmNomTab(which) {
 /* ===== JS MODULO: OBLEAS ===== */
 
 let cfg={},fotosMap={};
+var editandoTurnoId=null;
 function ob_normFecha(f){
   if(!f)return '';
   // Ya está en YYYY-MM-DD
@@ -2667,6 +2669,12 @@ function dbW(fn){
     add:function(reg){
       reg.id=Date.now()+Math.floor(Math.random()*1000);
       arr.push(reg);saveTurnos(arr);
+      return{result:reg.id};
+    },
+    put:function(reg){
+      var idx=arr.findIndex(function(r){return r.id===reg.id;});
+      if(idx>=0)arr[idx]=reg;else arr.push(reg);
+      saveTurnos(arr);
       return{result:reg.id};
     },
     delete:function(id){
@@ -3320,6 +3328,7 @@ function getMasaData(){
 }
 
 async function guardarManual(){
+  if(editandoTurnoId){return actualizarTurno();}
   var fecha=ob_normFecha(document.getElementById('e-fecha').value);
   var op1=document.getElementById('e-op1').value.trim();
   if(!fecha){showAlrt('manual','Por favor ingresa la fecha.','err');return;}
@@ -3401,60 +3410,161 @@ async function renderRegs(){
   if(elRH&&!elRH.value)elRH.value=hoyRR;
   var desde=elRD?elRD.value:h90RR;
   var hasta=elRH?elRH.value:hoyRR;
-  var diasReg={};
-  todos.forEach(function(r){
+  var filas=todos.filter(function(r){
     if(r.foto)fotosMap[r.id]=r.foto;
     var rf=ob_normFecha(r.fecha);
-    if(desde&&rf<desde)return;
-    if(hasta&&rf>hasta)return;
-    if(!diasReg[rf])diasReg[rf]={fecha:rf,m1:0,m2:0,m3:0,c1:0,c2:0,c3:0,har:0,gas:0,ops:[],foto:null,regs:[]};
-    diasReg[rf].regs.push(r);
-    diasReg[rf].m1+=(r.totM1||0);
-    diasReg[rf].m2+=(r.totM2||0);
-    diasReg[rf].m3+=(r.totM3||0);
-    diasReg[rf].c1+=(r.totC1||0);
-    diasReg[rf].c2+=(r.totC2||0);
-    diasReg[rf].c3+=(r.totC3||0);
-    diasReg[rf].har+=(r.harTotal||0);
-    diasReg[rf].gas+=(r.gasConsumo||0);
-    if(r.foto)diasReg[rf].foto=r.foto;
-    [r.op1,r.op2,r.op3,r.op4,r.op5,r.op6,r.op7,r.op8].filter(Boolean).forEach(function(op){
-      if(diasReg[rf].ops.indexOf(op)<0)diasReg[rf].ops.push(op);
-    });
+    if(desde&&rf<desde)return false;
+    if(hasta&&rf>hasta)return false;
+    return true;
+  }).sort(function(a,b){
+    var fa=ob_normFecha(a.fecha),fb=ob_normFecha(b.fecha);
+    return fb.localeCompare(fa)||((b.ts||'').localeCompare(a.ts||''));
   });
-  var dias=Object.values(diasReg).sort(function(a,b){return b.fecha.localeCompare(a.fecha);});
   var w=document.getElementById('regsWrap');
   if(!w)return;
-  if(!dias.length){w.innerHTML='<div class="empty">&#128235;<br>Sin registros para el per&iacute;odo.</div>';return;}
-  var rows=dias.map(function(d){
-    var p=(d.m1||0)+(d.m2||0)+(d.m3||0);
-    var combTotal=(d.c1||0)+(d.c2||0)+(d.c3||0);
-    var paqEq=p+combTotal*(20/50);
-    var c=p?Math.round(costoPonderado(d.regs)):0;
-    var gPaq=paqEq>0?Math.round((d.har||0)/paqEq*1000):0;
-    var moTotal=calcMOporOps(d.ops);
-    var moPaq=paqEq>0?Math.round(moTotal/paqEq):0;
-    var harStr=((d.har||0).toFixed(1));
-    var fotoHtml=d.foto?('<img src="'+d.foto+'" class="thumb" onclick="openLbFoto(this.src)" alt="Planilla">'):'&#8212;';
+  if(!filas.length){w.innerHTML='<div class="empty">&#128235;<br>Sin registros para el per&iacute;odo.</div>';return;}
+  var rows=filas.map(function(r){
+    var p=(r.totM1||0)+(r.totM2||0)+(r.totM3||0);
+    var cb=(r.totC1||0)+(r.totC2||0)+(r.totC3||0);
+    var pEq=p+cb*(20/50);
+    var gPaq=pEq>0?Math.round((r.harTotal||0)/pEq*1000):0;
+    var ops=[r.op1,r.op2,r.op3,r.op4,r.op5,r.op6,r.op7,r.op8].filter(Boolean);
+    var c=p?Math.round(costoTurno(r)):0;
+    var fotoHtml=r.foto?('<img src="'+r.foto+'" class="thumb" onclick="openLbFoto(this.src)" alt="Planilla">'):'&#8212;';
+    var editadoTag=r.editado?' <span class="badge bw" title="Editado">editado</span>':'';
     return '<tr>'+
-      '<td>'+d.fecha+'</td>'+
-      '<td>'+(d.m1||0)+'</td><td>'+(d.m2||0)+'</td><td>'+(d.m3||0)+'</td>'+
-      '<td>'+(d.c1||0)+'</td><td>'+(d.c2||0)+'</td><td>'+(d.c3||0)+'</td>'+
+      '<td style="white-space:nowrap">'+r.fecha+editadoTag+'</td>'+
+      '<td>'+(r.lote||'&#8212;')+'</td>'+
+      '<td style="max-width:120px;white-space:normal;font-size:11px">'+(ops.join(', ')||'&#8212;')+'</td>'+
+      '<td>'+(r.totM1||0)+'</td><td>'+(r.totM2||0)+'</td><td>'+(r.totM3||0)+'</td>'+
       '<td style="font-weight:700">'+p+'</td>'+
-      '<td>'+harStr+'</td>'+
+      '<td>'+((r.harTotal||0).toFixed(1))+'</td>'+
       '<td><span class="badge bw">'+gPaq+'g</span></td>'+
-      '<td><span class="badge bw">$'+moPaq.toLocaleString('es-CO')+'</span></td>'+
       '<td><span class="badge bok">$'+c.toLocaleString('es-CO')+'</span></td>'+
       '<td>'+fotoHtml+'</td>'+
-      '<td><button data-f="'+d.fecha+'" onclick="delDia(this.getAttribute(\'data-f\'))" style="background:none;border:none;cursor:pointer;font-size:16px;padding:4px">&#128465;</button></td>'+
+      '<td style="white-space:nowrap">'+
+        '<button data-id="'+r.id+'" onclick="editarTurno(Number(this.getAttribute(\'data-id\')))" style="background:none;border:none;cursor:pointer;font-size:16px;padding:4px" title="Editar este turno">&#9999;&#65039;</button>'+
+        '<button data-id="'+r.id+'" onclick="delReg(Number(this.getAttribute(\'data-id\')))" style="background:none;border:none;cursor:pointer;font-size:16px;padding:4px" title="Eliminar este turno">&#128465;</button>'+
+      '</td>'+
       '</tr>';
   });
   w.innerHTML='<div class="twrap"><table class="rt"><thead><tr>'+
-    '<th>Fecha</th><th>Obl M1</th><th>Obl M2</th><th>Obl M3</th>'+
-    '<th>Cb M1</th><th>Cb M2</th><th>Cb M3</th><th>Total</th>'+
-    '<th>Har kg</th><th>g/paq</th><th>MO/paq</th><th>$/paq</th><th>Foto</th><th></th>'+
+    '<th>Fecha</th><th>Lote</th><th>Operario(s)</th><th>M1</th><th>M2</th><th>M3</th><th>Total</th>'+
+    '<th>Har kg</th><th>g/paq</th><th>$/paq</th><th>Foto</th><th></th>'+
     '</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'+
-    '<p style="font-size:11px;color:var(--t2);margin-top:8px">'+dias.length+' d&iacute;a(s)</p>';
+    '<p style="font-size:11px;color:var(--t2);margin-top:8px">'+filas.length+' registro(s)</p>';
+}
+function cancelarEdicion(){
+  editandoTurnoId=null;
+  var banner=document.getElementById('edit-banner');if(banner)banner.style.display='none';
+  var btnG=document.getElementById('btn-guardar-turno');if(btnG)btnG.textContent='💾 Guardar turno completo';
+  limpiarManual();
+}
+function editarTurno(id){
+  var reg=getTurnos().filter(function(r){return r.id===id;})[0];
+  if(!reg){alert('No se encontr\u00F3 el registro. Puede que ya se haya borrado o modificado en otro celular.');renderRegs();return;}
+  pg('manual');
+  buildMasas();buildChecklist();
+  var set=function(id2,v){var el=document.getElementById(id2);if(el)el.value=v!=null?v:'';};
+  set('e-fecha',ob_normFecha(reg.fecha));
+  set('e-op1',reg.op1||'');set('e-op2',reg.op2||'');set('e-op3',reg.op3||'');
+  set('e-op4',reg.op4||'');set('e-op5',reg.op5||'');set('e-op6',reg.op6||'');
+  set('e-op7',reg.op7||'');set('e-op8',reg.op8||'');
+  set('e-sup',reg.sup||'');
+  set('m-gi',reg.gasIni||'');set('m-gf',reg.gasFin||'');
+  set('m-gcons',(reg.gasConsumo||0).toFixed(2));
+  set('m-hcons',(reg.harTotal||0).toFixed(3));
+  set('e-m1',String(reg.maq1?1:0));set('e-m2',String(reg.maq2?1:0));set('e-m3',String(reg.maq3?1:0));
+  set('e-obs',reg.obs||'');
+  (reg.masas||[]).forEach(function(m){
+    ['har','m1','c1','m2','c2','m3','c3'].forEach(function(f){
+      if(!m[f])return;
+      var el=document.querySelector('.mi[data-row="'+m.n+'"][data-f="'+f+'"]');
+      if(el)el.value=m[f];
+    });
+    if(m.obs){
+      var obsEl=document.querySelector('input[data-row="'+m.n+'"][data-f="obs"]');
+      if(obsEl)obsEl.value=m.obs;
+    }
+  });
+  sumMasas();
+  editandoTurnoId=id;
+  var banner=document.getElementById('edit-banner');
+  if(banner){
+    var txt=document.getElementById('edit-banner-txt');
+    if(txt)txt.textContent='✏️ Editando el turno del '+ob_normFecha(reg.fecha)+(reg.lote?(' \u00B7 Lote '+reg.lote):'')+' \u2014 al guardar se actualiza este mismo registro, no se crea uno nuevo.';
+    banner.style.display='block';
+  }
+  var btnG=document.getElementById('btn-guardar-turno');
+  if(btnG)btnG.textContent='💾 Guardar cambios del turno';
+  var pgEl=document.getElementById('pg-manual');
+  if(pgEl)pgEl.scrollIntoView({behavior:'smooth',block:'start'});
+}
+async function actualizarTurno(){
+  var id=editandoTurnoId;
+  var arr=getTurnos();
+  var idx=-1;
+  for(var i=0;i<arr.length;i++)if(arr[i].id===id)idx=i;
+  if(idx<0){showAlrt('manual','No se encontr\u00F3 el registro original \u2014 puede que ya se haya borrado.','err');cancelarEdicion();return;}
+  var viejo=arr[idx];
+  var fecha=ob_normFecha(document.getElementById('e-fecha').value);
+  var op1=document.getElementById('e-op1').value.trim();
+  if(!fecha){showAlrt('manual','Por favor ingresa la fecha.','err');return;}
+  if(!op1){showAlrt('manual','Por favor ingresa al menos un operario.','err');return;}
+  var tots={
+    m1:parseInt((document.getElementById('tM1')||{}).textContent)||0,
+    m2:parseInt((document.getElementById('tM2')||{}).textContent)||0,
+    m3:parseInt((document.getElementById('tM3')||{}).textContent)||0
+  };
+  var masas=getMasaData();
+  var nuevo={
+    id:id,ts:viejo.ts,editado:true,editadoTs:new Date().toISOString(),
+    fecha:fecha,
+    lote:viejo.lote||'',
+    hIng:viejo.hIng||'',
+    hSal:viejo.hSal||'',
+    op1:op1,
+    op2:document.getElementById('e-op2').value.trim(),
+    op3:(document.getElementById('e-op3')||{value:''}).value.trim(),
+    op4:(document.getElementById('e-op4')||{value:''}).value.trim(),
+    op5:(document.getElementById('e-op5')||{value:''}).value.trim(),
+    op6:(document.getElementById('e-op6')||{value:''}).value.trim(),
+    op7:(document.getElementById('e-op7')||{value:''}).value.trim(),
+    op8:(document.getElementById('e-op8')||{value:''}).value.trim(),
+    sup:document.getElementById('e-sup').value.trim(),
+    gasIni:parseFloat(document.getElementById('m-gi').value)||0,
+    gasFin:parseFloat(document.getElementById('m-gf').value)||0,
+    gasConsumo:parseFloat(document.getElementById('m-gcons').value)||0,
+    harTotal:parseFloat(document.getElementById('m-hcons').value)||0,
+    maq1:parseInt(document.getElementById('e-m1').value)||0,
+    maq2:parseInt(document.getElementById('e-m2').value)||0,
+    maq3:parseInt(document.getElementById('e-m3').value)||0,
+    obs:document.getElementById('e-obs').value,
+    masas:masas,
+    totPaq:tots.m1+tots.m2+tots.m3,
+    totM1:tots.m1,
+    totC1:parseInt((document.getElementById('tC1')||{}).textContent)||0,
+    totM2:tots.m2,
+    totC2:parseInt((document.getElementById('tC2')||{}).textContent)||0,
+    totM3:tots.m3,
+    totC3:parseInt((document.getElementById('tC3')||{}).textContent)||0,
+    foto:viejo.foto||null,metodo:viejo.metodo||'manual'
+  };
+  try{
+    if(window.DMDeshacer&&typeof DMDeshacer.turnoObleas==='function'){
+      await DMDeshacer.turnoObleas(viejo);
+    }
+    var invCheck=descontarInventario(nuevo);
+    if(!invCheck.ok){showAlrt('manual',invCheck.msg||'No se pudo aplicar el consumo del turno corregido.','err');return;}
+    await dbW(function(s){return s.put(nuevo);});
+    showAlrt('manual','✅ Turno actualizado \u2014 '+nuevo.totPaq+' paquetes.','ok');
+    cancelarEdicion();
+    ob_renderInicio();renderRegs();
+    try{if(typeof refrescarTodo==='function')refrescarTodo();}catch(e){}
+  }catch(e){
+    showAlrt('manual','❌ Error al actualizar: '+e.message,'err');
+    console.error('actualizarTurno:',e);
+  }
 }
 function openLb(id){if(fotosMap[id]){document.getElementById('lbImg').src=fotosMap[id];document.getElementById('lb').classList.add('open');}}
 function openLbFoto(src){if(src){document.getElementById('lbImg').src=src;document.getElementById('lb').classList.add('open');}}
@@ -13730,15 +13840,20 @@ var DMDeshacer = (function () {
 
     informe.insumos = devolverInsumosObleas(reg);
 
-    /* la marca dice si este turno llegó a entrar al stock de venta */
+    /* la marca solo evita que un mismo turno entre dos veces al guardar; no
+       se usa para decidir si se devuelve el stock de venta al borrar, porque
+       un turno guardado antes de que existiera esta marca sí entró al stock
+       en su momento y igual hay que devolverlo (si de verdad nunca hubiera
+       entrado, quitar de más deja el stock en negativo, que es visible y se
+       nota — mejor eso que dejar para siempre paquetes de más sin dueño). */
     var marca = (window.DMCostos && typeof DMCostos.marcaTurno === 'function')
       ? DMCostos.marcaTurno(reg) : null;
-    var entrados = leer('obleas_a_ventas', []);
-    var entro = marca ? entrados.indexOf(marca) >= 0 : false;
+    if (marca) {
+      var entrados = leer('obleas_a_ventas', []);
+      escribir('obleas_a_ventas', entrados.filter(function (m) { return m !== marca; }));
+    }
 
-    if (marca) escribir('obleas_a_ventas', entrados.filter(function (m) { return m !== marca; }));
-
-    if (!entro || (paquetes <= 0 && combos <= 0)) return Promise.resolve(informe);
+    if (paquetes <= 0 && combos <= 0) return Promise.resolve(informe);
 
     var quitar = [];
     if (paquetes > 0) quitar.push({ nombre: 'Oblea x 50 unidades', cant: paquetes });
@@ -16368,7 +16483,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 12/09/2026 15:51</div>
+                margin-top:10px;opacity:.75">Versión del 14/09/2026 15:27</div>
   </div>
 </div>
 
