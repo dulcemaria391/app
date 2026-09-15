@@ -464,7 +464,11 @@ body{
 #mod-arequipe .mov-compra{color:var(--verde);font-weight:600}
 #mod-arequipe .mov-consumo{color:var(--rojo);font-weight:600}
 #mod-arequipe .barra-inc{height:10px;border-radius:5px;display:inline-block;vertical-align:middle;transition:width .3s}
-#mod-arequipe .inc-row{display:grid;grid-template-columns:140px 80px 80px 80px 1fr;gap:6px;align-items:center;padding:5px 8px;border-radius:6px;font-size:.78rem}
+#mod-arequipe .inc-row{display:grid;grid-template-columns:1.7fr .8fr .8fr .9fr .9fr;gap:4px;align-items:center;padding:5px 6px;border-radius:6px;font-size:.74rem}
+#mod-arequipe .inc-row span{min-width:0;overflow-wrap:break-word}
+@media (max-width:400px){
+ #mod-arequipe .inc-row{font-size:.68rem;gap:3px;padding:4px}
+}
 #mod-arequipe .inc-row:nth-child(even){background:rgba(0,0,0,.03)}
 #mod-arequipe .inc-header{font-size:.68rem;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:.06em}
 #mod-arequipe .prod-lote-row{background:var(--crema);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;font-size:.82rem}
@@ -6594,7 +6598,7 @@ function verDesglose(id){
   var maxPct=insFilas.length>0?insFilas[0].pct:1;
 
   insFilas.forEach(function(f){
-    var barW=Math.round((f.pct/Math.max(maxPct,1))*120);
+    var barW=Math.min(30,Math.round((f.pct/Math.max(maxPct,1))*30));
     var barColor=f.pct>20?'var(--rojo)':f.pct>10?'var(--caramelo)':'var(--verde)';
     html+='<div class="inc-row">'+
       '<span><strong>'+f.nombre+'</strong></span>'+
@@ -6624,7 +6628,7 @@ function verDesglose(id){
     var precio=p[e.id]||e.precio;
     var valor=u*precio;
     var pct=cTot>0?(valor/cTot*100):0;
-    var barW=Math.round((pct/Math.max(maxPct,1))*120);
+    var barW=Math.min(30,Math.round((pct/Math.max(maxPct,1))*30));
     html+='<div class="inc-row">'+
       '<span><strong>'+e.nombre+'</strong></span>'+
       '<span>'+fmtN(u)+' und</span>'+
@@ -6650,7 +6654,7 @@ function verDesglose(id){
   ];
   html+='<div class="inc-row inc-header"><span>Concepto</span><span></span><span></span><span>Valor</span><span>% del lote</span></div>';
   otros.forEach(function(o){
-    var barW=Math.round((o.pct/Math.max(maxPct,1))*120);
+    var barW=Math.min(30,Math.round((o.pct/Math.max(maxPct,1))*30));
     html+='<div class="inc-row">'+
       '<span><strong>'+o.n+'</strong></span><span></span><span></span>'+
       '<span style="font-weight:600">'+fmt(o.v)+'</span>'+
@@ -16552,7 +16556,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 15/09/2026 12:42</div>
+                margin-top:10px;opacity:.75">Versión del 15/09/2026 13:22</div>
   </div>
 </div>
 
