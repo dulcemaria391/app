@@ -1766,6 +1766,14 @@ body{
 <!-- ===================== INICIO ===================== -->
 <section id="sec-inicio" class="sec activo">
   <div class="kpi-grid" id="kpi-inicio"></div>
+  <div class="card" id="card-anotar-gasto">
+    <div class="card-header"><h2>➖ Anotar un gasto</h2></div>
+    <p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Registra una salida de dinero (gasolina, transporte, compras, etc.), sin entrar a Finanzas.</p>
+    <div class="btn-row">
+      <button class="btn btn-ghost btn-sm" onclick="abrirGastoCaja()">💵 Gasto en efectivo</button>
+      <button class="btn btn-ghost btn-sm" onclick="abrirGastoBanco()">🏦 Salida de banco</button>
+    </div>
+  </div>
   <div class="card">
     <div class="card-header"><h2>📈 Ventas últimos 30 días</h2></div>
     <div class="chart-box"><canvas id="chart-inicio"></canvas></div>
@@ -2206,7 +2214,7 @@ body{
     <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="diagnosticoFacturas()">Ver todas las facturas</button></div>
     <div id="diag-facturas" style="margin-top:12px"></div>
   </div>
-  <div class="card">
+  <div class="card" id="card-diag-costo">
     <div class="card-header"><h2>💰 Diagnóstico de costo de ventas</h2></div>
     <p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Revisa el mes en curso factura por factura: qué costo se está usando para cada producto y de dónde sale. Sirve para encontrar ventas mal costeadas que inflan el costo y voltean la utilidad a pérdida.</p>
     <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="diagnosticoCosto()">Analizar costo del mes</button></div>
@@ -16025,7 +16033,7 @@ var DMPermisos = (function () {
      Bastó agregar la pestaña de Bodega para que esos números quedaran
      corridos y se ocultara la pestaña que no era. Ahora el botón se busca por
      el destino que lleva en su onclick, que no se mueve de sitio. */
-  var VENTAS = ['finanzas', 'resumen', 'cierres'];
+  var VENTAS = ['finanzas', 'resumen', 'cierres', 'reportes', 'caja', 'gastos'];
 
   /* Todos los botones —arriba y abajo— que llevan a una sección. */
   function botonesDe(seccion) {
@@ -16054,7 +16062,25 @@ var DMPermisos = (function () {
     p.ocultar.forEach(function (que) {
 
       if (que === 'utilidad') {
-        /* Ventas: Finanzas, Resumen y Cierres */
+        /* Ventas: Finanzas, Resumen, Cierres, Reportes, Caja y Gastos.
+
+           Reportes se sumó después de un reporte real de Tony: la pestaña
+           "📊 Reportes" de Ventas (KPIs de Utilidad bruta/neta, y el
+           desglose "Aporte de cada producto a la utilidad") vivía en
+           sec-reportes, fuera de esta lista, así que en el celular del
+           encargado se veía completa —exactamente la utilidad del negocio
+           que Tony pidió no mostrar ahí. La lista de lo que sí le queda al
+           encargado (vender, comprar, clientes, stock, nómina, producción)
+           nunca incluyó Reportes: era un hueco, no una decisión.
+
+           Caja y Gastos se sumaron por el mismo motivo, tras otro reporte
+           de Tony: "no quiero que el de la calle vea lo que hay en caja y
+           en bancos". sec-caja es el arqueo del día (saldo, cuadre,
+           diagnóstico) y sec-gastos es el ranking histórico de gastos —
+           ambas son vistas de CONSOLIDADO, no de registrar algo puntual,
+           así que se ocultan igual que Finanzas. Registrar un gasto suelto
+           sigue disponible: ver la tarjeta "Anotar un gasto" en Inicio,
+           más abajo. */
         VENTAS.forEach(function (sec) {
           if (vaciar(document.getElementById('sec-' + sec))) quitados.push(sec);
           botonesDe(sec).forEach(function (b) {
@@ -16066,10 +16092,71 @@ var DMPermisos = (function () {
           if (typeof window.renderFinanzas === 'function') window.renderFinanzas = function () {};
           if (typeof window.renderResumen === 'function') window.renderResumen = function () {};
           if (typeof window.renderCierres === 'function') window.renderCierres = function () {};
+          if (typeof window.renderReportes === 'function') window.renderReportes = function () {};
+          if (typeof window.renderCaja === 'function') window.renderCaja = function () {};
+          if (typeof window.renderGastos === 'function') window.renderGastos = function () {};
+        } catch (e) {}
+
+        /* Tercer hueco del mismo reporte: el saldo de Caja y de Bancos
+           también aparece en el Inicio (tarjetas "💵 En Caja" / "🏦 En
+           Bancos" del kpi-inicio) —el mismo consolidado, en la pantalla
+           que nunca se oculta porque ahí el encargado sí necesita ver sus
+           ventas, sus clientes y las alertas de stock. En vez de vaciar
+           todo Inicio, se envuelve renderInicio() para que, después de
+           dibujarse, se quiten solo esas dos tarjetas. Como Inicio se
+           vuelve a dibujar cada vez que se entra o se sincroniza, envolver
+           la función (y no solo limpiar una vez al cargar) es lo que hace
+           que el saldo no reaparezca en la siguiente visita.
+
+           OJO: obleas, arequipe y ventas tienen cada uno su propio
+           renderInicio(), así que build.py los renombra con el prefijo de
+           cada módulo para que no se pisen (el de Ventas queda como
+           "vt_renderInicio", visible igual en window porque es una función
+           global declarada suelta). Por eso NO se busca "renderInicio" a
+           secas —quedaría buscando una función que ya no existe con ese
+           nombre— sino que se prueba primero el nombre renombrado y, si
+           algún día ese renombrado cambiara o dejara de aplicarse, se cae
+           al nombre sin prefijo como respaldo. */
+        try {
+          var _nombreFnInicio = (typeof window.vt_renderInicio === 'function') ? 'vt_renderInicio' :
+                                 (typeof window.renderInicio === 'function') ? 'renderInicio' : null;
+          if (_nombreFnInicio && !window[_nombreFnInicio].__dmSinCajaBancos) {
+            var _renderInicioOriginal = window[_nombreFnInicio];
+            var nuevoRenderInicio = function () {
+              var r = _renderInicioOriginal.apply(this, arguments);
+              function limpiarSaldos() {
+                var cont = document.getElementById('kpi-inicio');
+                if (!cont) return;
+                Array.prototype.forEach.call(cont.querySelectorAll('.kpi'), function (tile) {
+                  var lbl = tile.querySelector('.lbl');
+                  var texto = lbl ? lbl.textContent : '';
+                  if (texto.indexOf('En Caja') >= 0 || texto.indexOf('En Bancos') >= 0) {
+                    if (tile.parentNode) tile.parentNode.removeChild(tile);
+                  }
+                });
+              }
+              if (r && typeof r.then === 'function') { r.then(limpiarSaldos); return r; }
+              limpiarSaldos();
+              return r;
+            };
+            nuevoRenderInicio.__dmSinCajaBancos = true;
+            window[_nombreFnInicio] = nuevoRenderInicio;
+            quitados.push('saldos de caja/bancos en Inicio');
+          }
         } catch (e) {}
         /* el Excel trae hojas de costo y utilidad */
         var bx = document.getElementById('dm-btn-excel');
         if (bx && bx.parentNode) bx.parentNode.removeChild(bx);
+
+        /* Segundo hueco del mismo reporte: dentro de Config había quedado
+           una tarjeta de diagnóstico ("Analizar costo del mes") que muestra
+           costo unitario y Utilidad bruta factura por factura — Config no
+           se oculta completo para el encargado (ahí sigue viendo su clave
+           de IA y el nombre del celular), así que se saca solo esa tarjeta. */
+        if (vaciar(document.getElementById('card-diag-costo'))) quitados.push('diagnóstico de costo (Config)');
+        try {
+          if (typeof window.diagnosticoCosto === 'function') window.diagnosticoCosto = function () {};
+        } catch (e) {}
       }
 
       if (que === 'costos') {
@@ -16557,7 +16644,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 15/09/2026 13:20</div>
+                margin-top:10px;opacity:.75">Versión del 15/09/2026 20:47</div>
   </div>
 </div>
 
