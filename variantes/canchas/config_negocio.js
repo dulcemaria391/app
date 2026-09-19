@@ -1,21 +1,27 @@
 /*
  * config_negocio.js — Configuración del negocio (DATO de instalación, no lógica)
  *
- * Variante: Canchas deportivas (alquiler por hora/turno)
- * Patrón: ver .claude/skills/app-generica-multicliente/SKILL.md
+ * Variante: Constructora de canchas de pádel — costeo POR PROYECTO/OBRA.
+ * NO es un negocio de alquiler por hora ni de venta por lote: cada cancha
+ * es una obra a la medida para un cliente. Ver ficha real del cliente y
+ * .claude/skills/app-generica-multicliente/SKILL.md (sección "motor de
+ * costeo por proyecto vs. por lote/turno").
  *
- * REGLA DE ORO: este archivo es la ÚNICA fuente de catálogo, insumos, receta
- * de costeo, trabajadores y plantillas. Ningún módulo de lógica
- * (motor_costeo.js, produccion_generica.html, ia_lectura.js) debe traer
- * estos datos escritos a mano — todos deben leer de CONFIG_NEGOCIO.
+ * La unidad de negocio es la OBRA, con llave natural
+ * cliente + ubicación + fecha_inicio. Los datos de cada obra (presupuesto
+ * aprobado, movimientos de compras/pagos) son DATOS DE OPERACIÓN por obra
+ * — viven en IndexedDB (datos.js) y se le pasan a motor_costeo.js como
+ * argumentos. Este archivo SOLO trae los catálogos que el dueño llena una
+ * vez y reutiliza obra tras obra.
  *
- * No hay una "ficha" del cliente real todavía: los valores de negocio,
- * catálogo, precios y receta de abajo son un EJEMPLO representativo de un
- * negocio de canchas (fútbol 5/8, tenis, pádel, baloncesto) para que
- * motor_costeo.js tenga algo real que costear. Antes de entregarle esta
- * copia a un cliente, reemplazar todo lo marcado "// EJEMPLO" con los datos
- * reales de ese negocio (flujo: ver SKILL.md, sección "Generar una copia
- * nueva para un cliente").
+ * REGLA DE ORO: ningún módulo de lógica (motor_costeo.js, ia_lectura.js,
+ * el módulo de obras) debe traer estas tablas escritas a mano.
+ *
+ * Los valores de catálogo de abajo (insumos, tarifas, tipos de ítem) son un
+ * EJEMPLO representativo para que motor_costeo.js tenga algo real que
+ * costear — reemplazar por los precios/tarifas reales de este negocio, que
+ * además "se actualiza seguido porque el precio de materiales varía"
+ * (ficha, sección 3).
  */
 (function (global) {
   'use strict';
@@ -23,125 +29,140 @@
   var CONFIG_NEGOCIO = {
 
     negocio: {
-      nombre: 'Canchas Deportivas El Golazo', // EJEMPLO
-      tipo: 'canchas',
+      nombre: 'Canchas de Pádel — Constructora', // EJEMPLO
+      tipo: 'constructora_canchas_padel',
       lugar: '',
       moneda: 'COP',
 
       // Prefijo único de almacenamiento de ESTA copia (localStorage/IndexedDB).
-      // Obligatorio y distinto por cliente aunque compartan variante "canchas"
-      // y aunque terminen publicados bajo el mismo dominio de GitHub Pages.
-      prefijoAlmacenamiento: 'cch_',
-      prefijoFactura: 'CCH-',
+      prefijoAlmacenamiento: 'ccp_',
+      prefijoFactura: 'CCP-',
 
-      // Licencia / activación offline-first (no login). Se pide una vez,
-      // se guarda con prefijoAlmacenamiento + 'activacion' en localStorage.
-      // urlVigencia: hoja de cálculo publicada o webhook con columna
-      // "válido hasta"; solo se consulta si hay señal, nunca bloqueante offline.
       activacion: {
         codigo: '',
         urlVigencia: ''
       }
     },
 
-    // Catálogo = catálogo de UNIDADES DE RESERVA, no de productos físicos.
-    // "unidad" para este negocio es 1 hora de uso de esa cancha.
-    // alias sirve para traducir nombres entre módulos (ventas, IA de lectura, etc).
-    catalogo: [
-      { id: 'futbol5',    nombre: 'Cancha fútbol 5',    alias: ['5', 'f5', 'futbol 5', 'fútbol 5'],       unidad: 'hora', precioUnidad: 60000 },
-      { id: 'futbol8',    nombre: 'Cancha fútbol 8',    alias: ['8', 'f8', 'futbol 8', 'fútbol 8'],       unidad: 'hora', precioUnidad: 90000 },
-      { id: 'tenis',      nombre: 'Cancha tenis',       alias: ['tenis'],                                  unidad: 'hora', precioUnidad: 40000 },
-      { id: 'padel',      nombre: 'Cancha pádel',       alias: ['padel', 'pádel'],                         unidad: 'hora', precioUnidad: 50000 },
-      { id: 'baloncesto', nombre: 'Cancha baloncesto',  alias: ['basquet', 'básquet', 'baloncesto'],       unidad: 'hora', precioUnidad: 45000 }
+    // Tipos de ítem de obra — líneas de cotización REUTILIZABLES, no un
+    // catálogo fijo de productos. Cada obra combina las que necesite y en
+    // la cantidad que necesite (ver plantillaCotizacion más abajo).
+    tiposItemObra: [
+      { id: 'cimentacion',         nombre: 'Cimentación',                    unidadReferencia: 'm2' },
+      { id: 'estructura_metalica', nombre: 'Estructura metálica',            unidadReferencia: 'ml' },
+      { id: 'cerramiento_malla',   nombre: 'Cerramiento en malla',           unidadReferencia: 'm2' },
+      { id: 'cerramiento_vidrio',  nombre: 'Cerramiento en vidrio templado', unidadReferencia: 'm2' },
+      { id: 'cesped_sintetico',    nombre: 'Césped sintético',               unidadReferencia: 'm2' },
+      { id: 'iluminacion',         nombre: 'Iluminación',                    unidadReferencia: 'unidad' },
+      { id: 'pintura',             nombre: 'Pintura de líneas y estructura', unidadReferencia: 'm2' }
     ], // EJEMPLO
 
-    // Insumos/materiales — tabla plana: insumo, unidad, precio. Igual forma
-    // que en Dulce María, aplicada a lo que consume una cancha por hora de uso
-    // (servicios prorateados + consumibles), no materia prima de producción.
+    // Insumos de construcción — tabla plana: insumo, unidad BASE, precio.
+    // Se actualiza seguido porque el precio de materiales varía. "alias"
+    // ayuda a que la IA de lectura de facturas empate nombres distintos
+    // del mismo insumo ("cemento gris", "cemento Rioclaro 50kg", etc).
     insumos: [
-      { id: 'energia',                 nombre: 'Energía / iluminación',            unidad: 'kWh',      precio: 850 },
-      { id: 'agua',                    nombre: 'Agua (riego / aseo)',              unidad: 'm3',       precio: 6500 },
-      { id: 'mantenimiento_sintetica', nombre: 'Mantenimiento grama sintética',    unidad: 'hora_uso', precio: 3500 },
-      { id: 'balon',                   nombre: 'Balón (préstamo / desgaste)',      unidad: 'uso',      precio: 1500 },
-      { id: 'chaleco',                 nombre: 'Chalecos (juego x2)',              unidad: 'uso',      precio: 500 },
-      { id: 'gas_duchas',              nombre: 'Gas duchas',                       unidad: 'uso',      precio: 800 }
+      { id: 'cemento',          nombre: 'Cemento',           unidad: 'kg',           precio: 950,    alias: ['cemento gris', 'bulto de cemento'] },
+      { id: 'arena',            nombre: 'Arena',             unidad: 'm3',           precio: 65000,  alias: ['arena de rio', 'arena de río'] },
+      { id: 'grava',            nombre: 'Grava / triturado', unidad: 'm3',           precio: 75000,  alias: ['triturado', 'gravilla'] },
+      { id: 'malla',            nombre: 'Malla eslabonada',  unidad: 'metro_lineal', precio: 18000,  alias: ['malla eslabonada', 'malla ciclon', 'malla ciclón'] },
+      { id: 'postes',           nombre: 'Postes metálicos',  unidad: 'unidad',       precio: 85000,  alias: ['poste', 'poste metalico', 'poste metálico'] },
+      { id: 'cesped_sintetico', nombre: 'Césped sintético',  unidad: 'm2',           precio: 45000,  alias: ['grama sintetica', 'grama sintética', 'pasto sintetico'] },
+      { id: 'vidrio_templado',  nombre: 'Vidrio templado',   unidad: 'm2',           precio: 220000, alias: ['vidrio templado', 'lamina de vidrio', 'lámina de vidrio'] },
+      { id: 'reflector_led',    nombre: 'Reflector LED',     unidad: 'unidad',       precio: 180000, alias: ['reflector', 'foco led', 'luminaria led'] },
+      { id: 'cable',            nombre: 'Cable eléctrico',   unidad: 'metro_lineal', precio: 3200,   alias: ['cable electrico', 'cable eléctrico'] }
     ], // EJEMPLO
 
-    // Receta de costeo — motor_costeo.js SOLO lee esto, no tiene fórmula fija.
-    // Por cada item del catálogo: qué insumos consume 1 unidad (1 hora) y cuánto.
-    receta: {
-      futbol5: [
-        { insumo: 'energia', cantidad: 6 },
-        { insumo: 'mantenimiento_sintetica', cantidad: 1 },
-        { insumo: 'balon', cantidad: 0.3 },
-        { insumo: 'chaleco', cantidad: 0.2 }
-      ],
-      futbol8: [
-        { insumo: 'energia', cantidad: 9 },
-        { insumo: 'mantenimiento_sintetica', cantidad: 1 },
-        { insumo: 'balon', cantidad: 0.3 },
-        { insumo: 'chaleco', cantidad: 0.2 }
-      ],
-      tenis: [
-        { insumo: 'energia', cantidad: 3 },
-        { insumo: 'agua', cantidad: 0.05 }
-      ],
-      padel: [
-        { insumo: 'energia', cantidad: 3.5 }
-      ],
-      baloncesto: [
-        { insumo: 'energia', cantidad: 4 },
-        { insumo: 'agua', cantidad: 0.02 },
-        { insumo: 'gas_duchas', cantidad: 0.5 }
-      ]
-    }, // EJEMPLO
-
-    // Trabajadores — genérico por línea/módulo. Aquí "línea" es el turno/cancha
-    // en operación, no una línea de producción.
-    trabajadores: [
-      { id: 'administrador', nombre: 'Administrador de turno', tipoPago: 'hora',  valor: 8000 },
-      { id: 'aseo',          nombre: 'Aseo y mantenimiento',   tipoPago: 'hora',  valor: 6000 },
-      { id: 'vigilante',     nombre: 'Vigilancia',             tipoPago: 'turno', valor: 25000 }
+    // Cuadrilla propia — igual que DMTrabajadores, generalizado: tarifa
+    // por DÍA (este negocio paga por jornada de obra, no por hora).
+    cuadrillaPropia: [
+      { id: 'oficial_obra',  nombre: 'Oficial de construcción', tarifaDia: 90000 },
+      { id: 'ayudante_obra', nombre: 'Ayudante de obra',        tarifaDia: 60000 },
+      { id: 'electricista',  nombre: 'Electricista',            tarifaDia: 110000 }
     ], // EJEMPLO
 
-    // Mano de obra por unidad de catálogo: cuántas "unidades" de cada
-    // trabajador consume 1 hora de uso. El motor los suma igual que un
-    // insumo más, con su propio precio (valor del trabajador).
-    manoDeObra: {
-      futbol5:    [{ trabajador: 'administrador', cantidad: 1 }],
-      futbol8:    [{ trabajador: 'administrador', cantidad: 1 }],
-      tenis:      [{ trabajador: 'administrador', cantidad: 0.5 }],
-      padel:      [{ trabajador: 'administrador', cantidad: 0.5 }],
-      baloncesto: [{ trabajador: 'administrador', cantidad: 1 }]
-    }, // EJEMPLO
+    // Subcontratistas — SOLO directorio (nombre + especialidad). A
+    // diferencia de la cuadrilla propia, NO tienen tarifa fija aquí: la
+    // tarifa se pacta obra por obra y se registra como movimiento
+    // 'pacto_subcontrato' de esa obra (campo libre, no catálogo).
+    subcontratistas: [
+      { id: 'sub_cimentacion', nombre: 'Cimentaciones JM',   especialidad: 'Cimentación y obra civil' },
+      { id: 'sub_estructura',  nombre: 'Estructuras Andino', especialidad: 'Estructura metálica' }
+    ], // EJEMPLO
 
-    // Plantilla de documento (recibo de reserva) — reemplaza el layout fijo
-    // en canvas por campos configurables.
-    plantillaDocumento: {
-      titulo: 'Recibo de reserva',
+    // Tipos de costo fijo asignable a una obra.
+    costosFijosTipo: [
+      { id: 'transporte', nombre: 'Transporte de materiales/equipo' },
+      { id: 'permisos',   nombre: 'Permisos y trámites' }
+    ], // EJEMPLO
+
+    // Conversión de unidad de COMPRA → unidad BASE del insumo (la que usa
+    // el catálogo de insumos arriba). Quien capture el dato (IA de lectura
+    // de facturas o captura manual) convierte con esta tabla ANTES de
+    // guardar el movimiento — motor_costeo.js siempre trabaja en unidad
+    // base, nunca hace la conversión por su cuenta.
+    // Factores de EJEMPLO: varían por proveedor/formato real, ajustar.
+    conversiones: [
+      { insumo: 'cemento',         unidadCompra: 'bulto_50kg', unidadBase: 'kg',           factor: 50 },
+      { insumo: 'malla',           unidadCompra: 'rollo',      unidadBase: 'metro_lineal', factor: 50 },
+      { insumo: 'vidrio_templado', unidadCompra: 'lamina',     unidadBase: 'm2',           factor: 5.4 }
+    ], // EJEMPLO
+
+    // Plantilla de cotización/presupuesto — el MOLDE de una línea de
+    // presupuesto de obra (qué campos tiene), no datos de una obra real.
+    // categoriaCosto es la misma clasificación que usa motor_costeo.js
+    // para poder comparar presupuestado vs. real por categoría.
+    plantillaCotizacion: {
+      titulo: 'Ítem de presupuesto de obra',
       campos: [
-        { id: 'cliente',     etiqueta: 'Cliente',     tipo: 'texto',     requerido: true },
-        { id: 'telefono',    etiqueta: 'Teléfono',    tipo: 'texto',     requerido: false },
-        { id: 'cancha',      etiqueta: 'Cancha',      tipo: 'catalogo',  requerido: true },
-        { id: 'fecha',       etiqueta: 'Fecha',       tipo: 'fecha',     requerido: true },
-        { id: 'horaInicio',  etiqueta: 'Hora inicio', tipo: 'hora',      requerido: true },
-        { id: 'horas',       etiqueta: 'Horas',       tipo: 'numero',    requerido: true },
-        { id: 'abono',       etiqueta: 'Abono',       tipo: 'moneda',    requerido: false },
-        { id: 'saldo',       etiqueta: 'Saldo',       tipo: 'moneda',    requerido: false, calculado: true }
+        { id: 'tipoItem',              etiqueta: 'Tipo de ítem',              tipo: 'tiposItemObra', requerido: true },
+        { id: 'categoriaCosto',        etiqueta: 'Categoría de costo',        tipo: 'enum', opciones: ['materiales', 'mano_obra_propia', 'subcontratos', 'fijos'], requerido: true },
+        { id: 'cantidadEstimada',      etiqueta: 'Cantidad estimada',         tipo: 'numero', requerido: true },
+        { id: 'unidad',                etiqueta: 'Unidad',                    tipo: 'texto', requerido: true },
+        { id: 'precioUnitarioEstimado', etiqueta: 'Precio unitario estimado', tipo: 'moneda', requerido: true }
       ]
-    }, // EJEMPLO
+    },
 
-    // Prompt de IA de lectura de fotos — SOLO la parte específica del
-    // documento de este negocio. El bloque de identidad/comportamiento
-    // general (JSON siempre, formatos LatAm de fecha/moneda/documento) es
-    // fijo, vive en ia_lectura.js, y NO se toca por cliente.
+    // Plantilla de factura/recibo de compra de material — para que la IA
+    // (y la captura manual) sepan exactamente qué extraer.
+    plantillaFacturaCompra: {
+      titulo: 'Factura de compra de material',
+      campos: [
+        { id: 'proveedor', etiqueta: 'Proveedor',   tipo: 'texto', requerido: true },
+        { id: 'nit',       etiqueta: 'NIT/RUT',     tipo: 'texto', requerido: false },
+        { id: 'fecha',     etiqueta: 'Fecha',       tipo: 'fecha', requerido: true },
+        {
+          id: 'items', etiqueta: 'Ítems', tipo: 'lista', requerido: true,
+          subcampos: [
+            { id: 'material',       etiqueta: 'Material',        tipo: 'insumos' },
+            { id: 'cantidad',       etiqueta: 'Cantidad',        tipo: 'numero' },
+            { id: 'unidad',         etiqueta: 'Unidad',          tipo: 'texto' },
+            { id: 'precioUnitario', etiqueta: 'Precio unitario', tipo: 'moneda' },
+            { id: 'total',          etiqueta: 'Total',           tipo: 'moneda', calculado: true }
+          ]
+        },
+        { id: 'formaPago', etiqueta: 'Forma de pago', tipo: 'texto', requerido: false }
+      ]
+    },
+
+    // Prompt de IA de lectura de fotos — SOLO la parte específica de este
+    // documento (factura de compra de material). El bloque de identidad/
+    // comportamiento general (JSON siempre, formatos LatAm de NIT/fecha/
+    // moneda) vive en ia_lectura.js y NO se toca por cliente.
     promptsIA: {
-      reciboReserva: [
-        'Estás leyendo un recibo o nota de reserva de cancha, escrito a mano o impreso.',
-        'Extrae: nombre del cliente, cancha o tipo de cancha reservada, fecha, hora de inicio,',
-        'número de horas, valor por hora, abono/anticipo pagado y saldo pendiente.',
-        'Si el papel dice solo "5" o "8" interpreta como fútbol 5 / fútbol 8 según el catálogo.',
-        'Si no hay abono explícito, usa 0.'
+      facturaCompra: [
+        'Estás leyendo una factura o recibo de compra de material de construcción.',
+        'Extrae: proveedor, NIT/RUT, fecha, y por cada ítem: material, cantidad, unidad,',
+        'precio unitario y total; también la forma de pago si aparece.',
+        'Reglas de conversión de unidad antes de devolver el JSON:',
+        '- Si el material viene en "bultos" de cemento, convierte la cantidad a kilogramos',
+        '  (1 bulto = 50 kg salvo que la factura indique otro peso).',
+        '- Si el material viene en "rollos" de malla, convierte la cantidad a metros lineales',
+        '  usando la longitud del rollo indicada en la factura, o 50 metros si no se indica.',
+        '- Si el material son "láminas" de vidrio, convierte la cantidad a metros cuadrados',
+        '  usando el ancho x alto de la lámina indicados en la factura.',
+        'Si el nombre del material no coincide exacto con el catálogo, usa el más parecido',
+        'por significado (ej. "cemento gris" = cemento, "grama sintética" = césped sintético).'
       ].join(' ')
     } // EJEMPLO
   };
