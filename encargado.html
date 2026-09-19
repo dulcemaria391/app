@@ -1091,20 +1091,20 @@ body{
   <div class="stit">👷 Mano de obra diaria ($)</div>
   <p style="font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px;text-transform:uppercase">Máquina 1</p>
   <div class="row2">
-    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq1m" value="70500" inputmode="numeric"></div>
-    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq1c" value="65000" inputmode="numeric"></div>
-    <div class="f"><label>Masero</label><input type="number" id="cfg-maq1ma" value="65000" inputmode="numeric"></div>
+    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq1m" value="65500" inputmode="numeric"></div>
+    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq1c" value="60000" inputmode="numeric"></div>
+    <div class="f"><label>Masero</label><input type="number" id="cfg-maq1ma" value="60000" inputmode="numeric"></div>
   </div>
   <p style="font-size:11px;font-weight:700;color:var(--t2);margin:8px 0;text-transform:uppercase">Máquina 2</p>
   <div class="row2">
-    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq2m" value="60000" inputmode="numeric"></div>
-    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq2c" value="60000" inputmode="numeric"></div>
+    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq2m" value="55000" inputmode="numeric"></div>
+    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq2c" value="55000" inputmode="numeric"></div>
   </div>
   <p style="font-size:11px;font-weight:700;color:var(--t2);margin:8px 0;text-transform:uppercase">Máquina 3</p>
   <div class="row2">
-    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq3m" value="70500" inputmode="numeric"></div>
-    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq3c" value="65000" inputmode="numeric"></div>
-    <div class="f"><label>Masero</label><input type="number" id="cfg-maq3ma" value="65000" inputmode="numeric"></div>
+    <div class="f"><label>Maquinero</label><input type="number" id="cfg-maq3m" value="65500" inputmode="numeric"></div>
+    <div class="f"><label>Cortador</label><input type="number" id="cfg-maq3c" value="60000" inputmode="numeric"></div>
+    <div class="f"><label>Masero</label><input type="number" id="cfg-maq3ma" value="60000" inputmode="numeric"></div>
   </div>
 </div>
 <div class="sec">
@@ -2149,6 +2149,14 @@ body{
     <div class="card-header"><h2>📦 Valor del inventario por producto</h2></div>
     <div id="resumen-inventario"></div>
   </div>
+  <div class="card">
+    <div class="card-header"><h2>⚖️ Balance general (Activo = Pasivo + Patrimonio)</h2>
+      <div class="ch-actions"><button class="btn btn-ghost btn-sm" onclick="exportBalance()">⬇ Excel</button></div>
+    </div>
+    <p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Lo que tiene el negocio (Activo), lo que debe (Pasivo) y lo que realmente es tuyo (Patrimonio: lo que has aportado más la utilidad acumulada). Los préstamos a empleados y los préstamos/aportes que recibes ya no restan ni suman a la utilidad — viven aquí.</p>
+    <div class="kpi-grid" id="kpi-balance"></div>
+    <div id="balance-detalle" style="margin-top:6px"></div>
+  </div>
 </section>
 
 <!-- ===================== CIERRES MENSUALES ===================== -->
@@ -2702,9 +2710,39 @@ function dbW(fn){
 }
 
 const CFGK=['bulto','lec','adi','ades','ico','bol','cir','ter','tarcomb','mgas','maq1m','maq1c','maq1ma','maq2m','maq2c','maq3m','maq3c','maq3ma','gas2','jona','guan','cin','caj','arr','arrs'];
-const CFGD={bulto:145000,lec:180,adi:130,ades:160,ico:250,bol:200,cir:150,ter:110,tarcomb:1,mgas:3500,maq1m:70500,maq1c:65000,maq1ma:65000,maq2m:60000,maq2c:60000,maq3m:70500,maq3c:65000,maq3ma:65000,gas2:500000,jona:890000,guan:50000,cin:60000,caj:200000,arr:250000,arrs:750000};
+/* [JORNALES 19-sep-2026] Tony reportó los jornales por día mal: quedaban
+   Máquina 1 y 3 con maquinero $70.500 / cortador y masero $65.000, y
+   Máquina 2 (Fabian y Karolay) a $60.000 cada uno. Los correctos son:
+   maquinero $65.500, cortador $60.000 y masero $60.000 en M1 y M3, y
+   Fabian/Karolay (M2) a $55.000 cada uno. El bono de $5.000 por turno
+   (DESCUENTO_BONO, en getWorkerPago abajo) ya estaba bien y no cambia. */
+const CFGD={bulto:145000,lec:180,adi:130,ades:160,ico:250,bol:200,cir:150,ter:110,tarcomb:1,mgas:3500,maq1m:65500,maq1c:60000,maq1ma:60000,maq2m:55000,maq2c:55000,maq3m:65500,maq3c:60000,maq3ma:60000,gas2:500000,jona:890000,guan:50000,cin:60000,caj:200000,arr:250000,arrs:750000};
+/* Corrige, UNA SOLA VEZ, un `obleas_cfg` ya guardado en este celular que
+   todavía tenga exactamente los jornales viejos (de antes de este arreglo).
+   Solo toca esas 8 llaves de jornal — nada de insumos ni otros costos — y
+   solo si siguen en el valor viejo, para no pisar un ajuste manual que
+   alguien haya hecho a propósito después. */
+function corregirJornalesNomina(){
+  try{
+    if(localStorage.getItem('obleas_jornales_corregidos_19sep2026'))return;
+    var d=localStorage.getItem('obleas_cfg');
+    var c=d?JSON.parse(d):null;
+    if(c){
+      var viejos={maq1m:70500,maq1c:65000,maq1ma:65000,maq2m:60000,maq2c:60000,maq3m:70500,maq3c:65000,maq3ma:65000};
+      var nuevos={maq1m:65500,maq1c:60000,maq1ma:60000,maq2m:55000,maq2c:55000,maq3m:65500,maq3c:60000,maq3ma:60000};
+      var cambio=false;
+      Object.keys(viejos).forEach(function(k){
+        var actual=(c[k]!==undefined&&c[k]!==null)?Number(c[k]):viejos[k];
+        if(actual===viejos[k]){ c[k]=nuevos[k]; cambio=true; }
+      });
+      if(cambio)localStorage.setItem('obleas_cfg',JSON.stringify(c));
+    }
+    localStorage.setItem('obleas_jornales_corregidos_19sep2026','1');
+  }catch(e){}
+}
 function loadCfg(){
   try{
+    corregirJornalesNomina();
     var d=localStorage.getItem('obleas_cfg');
     if(d){cfg=JSON.parse(d);}else{cfg={};CFGK.forEach(function(k){cfg[k]=CFGD[k];});}
     CFGK.forEach(function(k){var el=document.getElementById('cfg-'+k);if(el)el.value=(cfg[k]!==undefined&&cfg[k]!==null)?cfg[k]:CFGD[k];});
@@ -4125,14 +4163,14 @@ function limpiarNombre(s){return String(s||'').toLowerCase().normalize('NFD').re
 function getWorkerPago(nombre){
   const w=WORKERS.find(x=>x.nombre.toLowerCase()===nombre.toLowerCase());
   if(!w)return 0;
-  if(w.maq===1&&w.rol==='Maquinero')return cfg.maq1m||70500;
-  if(w.maq===1&&w.rol==='Masero')   return cfg.maq1ma||65000;
-  if(w.maq===1&&w.rol==='Cortadora')return cfg.maq1c||65000;
-  if(w.maq===2&&w.rol==='Maquinero')return cfg.maq2m||60000;
-  if(w.maq===2&&w.rol==='Cortadora')return cfg.maq2c||60000;
-  if(w.maq===3&&w.rol==='Maquinero')return cfg.maq3m||70500;
-  if(w.maq===3&&w.rol==='Cortadora')return cfg.maq3c||65000;
-  if(w.maq===3&&w.rol==='Masero')   return cfg.maq3ma||65000;
+  if(w.maq===1&&w.rol==='Maquinero')return cfg.maq1m||65500;
+  if(w.maq===1&&w.rol==='Masero')   return cfg.maq1ma||60000;
+  if(w.maq===1&&w.rol==='Cortadora')return cfg.maq1c||60000;
+  if(w.maq===2&&w.rol==='Maquinero')return cfg.maq2m||55000;
+  if(w.maq===2&&w.rol==='Cortadora')return cfg.maq2c||55000;
+  if(w.maq===3&&w.rol==='Maquinero')return cfg.maq3m||65500;
+  if(w.maq===3&&w.rol==='Cortadora')return cfg.maq3c||60000;
+  if(w.maq===3&&w.rol==='Masero')   return cfg.maq3ma||60000;
   return 0;
 }
 
@@ -8051,10 +8089,15 @@ function renderReportes(){
       },0);
     },0);
     var utilidad=totalVentas-costoVendido;
-    /* [GASTOS] solo los operativos restan utilidad; los de producción ya están en el costo */
+    /* [GASTOS] solo los operativos restan utilidad; los de producción ya están en el costo.
+       [FINANCIERO/CAPITAL] préstamos (dados o recibidos) y aportes del dueño tampoco restan
+       ni suman utilidad — mueven caja y una deuda o un capital, no una ganancia o pérdida del
+       negocio (ver costos.js:prestar y ventas.html:confirmarIngreso). */
     var idsF={}; facturas.forEach(function(f){ idsF[f.id]=true; });
-    var totalGastosOp=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase!=='produccion')?(Number(m.monto)||0):0); },0);
+    function esMovBalance(m){ return m.clase==='financiero'||m.clase==='capital'; }
+    var totalGastosOp=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase!=='produccion'&&!esMovBalance(m))?(Number(m.monto)||0):0); },0);
     var totalProduccion=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase==='produccion')?(Number(m.monto)||0):0); },0);
+    var totalFinanciero=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; if(!esMovBalance(m))return s; return s+((m.tipo==='egreso'?-1:1)*(Number(m.monto)||0)); },0);
     var utilidadNeta=utilidad-totalGastosOp;
     vt_gId('kpi-reportes').innerHTML=
       kpi(fmtMoneda(totalVentas),'Ventas totales','destacado')+
@@ -8064,6 +8107,7 @@ function renderReportes(){
       kpi(fmtMoneda(utilidadNeta),'Utilidad neta','destacado')+
       kpi(fmtMoneda(totalProduccion),'Compras producción','azul')+
       kpi(fmtMoneda(inventario.reduce(function(s,i){var st=Number(i.stock)||0;return s+(st>0?st*(Number(i.precioCosto)||0):0);},0)),'💰 Valor inventario','azul')+
+      kpi(fmtMoneda(totalFinanciero),'💼 Préstamos y aportes (no afecta utilidad)','')+
       kpi(numFact,'Facturas','miel')+
       kpi(fmtMoneda(ticketProm),'Ticket promedio','miel')+
       kpi(totalUnidades,'Unidades vendidas','verde');
@@ -8323,14 +8367,16 @@ function renderFinanzas(){
         '<span>🏦 <strong>'+esc(b)+'</strong> <span style="font-size:.72rem;color:var(--gris)">›  ver detalle</span></span><strong style="color:var(--azul)">'+fmtMoneda(porBanco[b])+'</strong></div>';
     }).join(''):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin movimientos en bancos.</p>';
 
-    /* [GASTOS POR CLASE] separar producción (no resta utilidad) de operativos (sí resta).
+    /* [GASTOS POR CLASE] separar producción (no resta utilidad), operativos (sí resta) y
+       financiero/capital (préstamos y aportes: tampoco restan, no son gasto real).
        Solo del MES EN CURSO: desde el día siguiente al último cierre. */
     var desdeGastos = ultimoCierre ? diaSiguiente(ultimoCierre.fecha_hasta) : null;
-    var prodPorCat={}, opPorCat={}, totalProd=0, totalOp=0;
+    var prodPorCat={}, opPorCat={}, finPorCat={}, totalProd=0, totalOp=0, totalFin=0;
     movs.forEach(function(m){ if(m.tipo==='egreso'){
       if(desdeGastos && (!m.fecha || m.fecha<desdeGastos))return; /* fuera del mes en curso */
       var cat=m.categoria||'Otros'; var monto=Number(m.monto)||0;
       if(m.clase==='produccion'){ prodPorCat[cat]=(prodPorCat[cat]||0)+monto; totalProd+=monto; }
+      else if(m.clase==='financiero'||m.clase==='capital'){ finPorCat[cat]=(finPorCat[cat]||0)+monto; totalFin+=monto; }
       else { opPorCat[cat]=(opPorCat[cat]||0)+monto; totalOp+=monto; }
     } });
     function barras(obj,total,color){
@@ -8350,7 +8396,12 @@ function renderFinanzas(){
       barras(prodPorCat,totalProd,'var(--azul)')+
       '<div class="sec-label" style="margin-top:16px">🧾 Gastos operativos · '+fmtMoneda(totalOp)+'</div>'+
       '<p style="font-size:.74rem;color:var(--gris);margin-bottom:6px">Restan de la utilidad neta.</p>'+
-      barras(opPorCat,totalOp,'var(--rojo)');
+      barras(opPorCat,totalOp,'var(--rojo)')+
+      (totalFin>0?(
+        '<div class="sec-label" style="margin-top:16px">💼 Préstamos y aportes · '+fmtMoneda(totalFin)+'</div>'+
+        '<p style="font-size:.74rem;color:var(--gris);margin-bottom:6px">No son gasto: es plata que se espera de vuelta (préstamos) o que ya es tuya (capital). No restan utilidad.</p>'+
+        barras(finPorCat,totalFin,'var(--miel)')
+      ):'');
   });
 }
 
@@ -8414,8 +8465,8 @@ function exportMovimientosBanco(banco){
 
 /* [RESUMEN] estado general: caja, bancos, cuentas por cobrar, inventario por producto */
 function renderResumen(){
-  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO)]).then(function(r){
-    var movs=r[0],facturas=r[1],inv=r[2];
+  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),calcularPeriodo(null,hoyISO())]).then(function(r){
+    var movs=r[0],facturas=r[1],inv=r[2],utilHist=r[3];
     var idsF={}; facturas.forEach(function(f){ idsF[f.id]=true; });
     var caja=0, porBanco={}, cobrarTot=0, cobrarPend=[], pagarTot=0, pagarPend=[];
     movs.forEach(function(m){
@@ -8461,7 +8512,89 @@ function renderResumen(){
       conStock.map(function(i){ var st=Number(i.stock)||0, c=Number(i.precioCosto)||0;
         return '<tr><td><strong>'+esc(i.nombre||i.key)+'</strong></td><td>'+st+'</td><td>'+fmtMoneda(c)+'</td><td><strong>'+fmtMoneda(st*c)+'</strong></td></tr>'; }).join('')+
       '<tr style="font-weight:700"><td colspan="3">Total inventario</td><td>'+fmtMoneda(valorInv)+'</td></tr></tbody></table></div>'):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin productos con stock.</p>';
+
+    /* ============================================================
+       [BALANCE] Activo = Pasivo + Patrimonio.
+
+       Activo  = Caja + Bancos + Por cobrar (clientes) + Préstamos a
+                 empleados pendientes (DMPrestamos) + Valor del inventario.
+       Pasivo  = Por pagar (incluye deudas a proveedores Y los préstamos
+                 recibidos, que desde este arreglo quedan como una cuenta
+                 por pagar más — ver confirmarIngreso).
+       Patrimonio = Capital aportado por el dueño (acumulado, clase:'capital')
+                 + Utilidad acumulada histórica (calcularPeriodo desde el
+                 primer movimiento hasta hoy, ya con préstamos/aportes
+                 excluidos de la utilidad).
+
+       Patrimonio se calcula DOS veces por separado —como Activo−Pasivo, y
+       como Capital+Utilidad— y se muestran ambas. Si coinciden, el balance
+       cuadra de verdad. Si no, la diferencia es una pista real de algo por
+       revisar (un movimiento antiguo mal clasificado, de antes de este
+       arreglo, por ejemplo) — igual que ya hacen diagnosticoFacturas y
+       diagnosticoCosto en Config. */
+    var capitalNeto=movs.reduce(function(s,m){
+      if(m.facturaId&&!idsF[m.facturaId])return s;
+      /* 'saldo_inicial' (con lo que arrancó el negocio) cuenta como capital
+         del dueño igual que 'capital' (Aporte del dueño) — ver CAT_INGRESO. */
+      if(m.clase!=='capital'&&m.clase!=='saldo_inicial')return s;
+      return s+((m.tipo==='ingreso'?1:-1)*(Number(m.monto)||0));
+    },0);
+    var prestamosEmpTot=(typeof DMPrestamos!=='undefined'&&DMPrestamos&&typeof DMPrestamos.saldos==='function')
+      ? DMPrestamos.saldos().reduce(function(s,e){return s+(Number(e.saldo)||0);},0) : 0;
+    var activoTot=caja+bancosTot+cobrarTot+prestamosEmpTot+valorInv;
+    var pasivoTot=pagarTot;
+    var patrimonioCalc=capitalNeto+(utilHist.utilidadNeta||0);
+    var patrimonioPorDiferencia=activoTot-pasivoTot;
+    var diferencia=patrimonioPorDiferencia-patrimonioCalc;
+    var cuadra=Math.abs(diferencia)<1;
+    window._balanceActual={activoTot:activoTot,pasivoTot:pasivoTot,capitalNeto:capitalNeto,
+      utilidadAcumulada:utilHist.utilidadNeta,patrimonioCalc:patrimonioCalc,
+      patrimonioPorDiferencia:patrimonioPorDiferencia,diferencia:diferencia,
+      caja:caja,bancosTot:bancosTot,cobrarTot:cobrarTot,prestamosEmpTot:prestamosEmpTot,
+      valorInv:valorInv,pagarTot:pagarTot};
+    var elKB=vt_gId('kpi-balance');
+    if(elKB){
+      elKB.innerHTML=
+        kpi(fmtMoneda(activoTot),'📈 Activo total','verde')+
+        kpi(fmtMoneda(pasivoTot),'📉 Pasivo total','')+
+        kpi(fmtMoneda(patrimonioCalc),'⚖️ Patrimonio','destacado');
+    }
+    var elBD=vt_gId('balance-detalle');
+    if(elBD){
+      elBD.innerHTML=
+        '<div class="sec-label" style="margin-top:2px">📈 Activo · '+fmtMoneda(activoTot)+'</div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>💵 Caja</span><strong>'+fmtMoneda(caja)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>🏦 Bancos</span><strong>'+fmtMoneda(bancosTot)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>📋 Por cobrar (clientes)</span><strong>'+fmtMoneda(cobrarTot)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>👤 Préstamos a empleados pendientes</span><strong>'+fmtMoneda(prestamosEmpTot)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📦 Valor del inventario</span><strong>'+fmtMoneda(valorInv)+'</strong></div>'+
+        '<div class="sec-label" style="margin-top:14px">📉 Pasivo · '+fmtMoneda(pasivoTot)+'</div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>💸 Por pagar (proveedores y préstamos recibidos)</span><strong>'+fmtMoneda(pasivoTot)+'</strong></div>'+
+        '<div class="sec-label" style="margin-top:14px">⚖️ Patrimonio · '+fmtMoneda(patrimonioCalc)+'</div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>💰 Capital aportado por el dueño (acumulado)</span><strong>'+fmtMoneda(capitalNeto)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📊 Utilidad acumulada histórica</span><strong>'+fmtMoneda(utilHist.utilidadNeta||0)+'</strong></div>'+
+        '<div class="mini-row" style="padding:10px 0;font-weight:700;border-top:2px solid var(--crema2);margin-top:6px"><span>Activo − Pasivo (patrimonio por diferencia)</span><strong>'+fmtMoneda(patrimonioPorDiferencia)+'</strong></div>'+
+        (cuadra
+          ? '<p style="font-size:.8rem;color:var(--verde);margin-top:8px">✅ El balance cuadra: Activo = Pasivo + Patrimonio.</p>'
+          : '<p style="font-size:.8rem;color:var(--rojo);margin-top:8px">⚠️ Diferencia de '+fmtMoneda(Math.abs(diferencia))+' entre Activo−Pasivo y Capital+Utilidad. Puede venir de movimientos de antes de este arreglo (préstamos o aportes ya registrados con la clasificación vieja) — revisa Finanzas y Reportes de esos meses.</p>');
+    }
   });
+}
+function exportBalance(){
+  var b=window._balanceActual;
+  if(!b){ toast('Primero abre Resumen para calcular el balance','warn'); return; }
+  var filas=[['BALANCE GENERAL · '+hoyISO()],[],
+    ['ACTIVO','',''],
+    ['Caja','',b.caja],['Bancos','',b.bancosTot],['Por cobrar (clientes)','',b.cobrarTot],
+    ['Préstamos a empleados pendientes','',b.prestamosEmpTot],['Valor del inventario','',b.valorInv],
+    ['Total activo','',b.activoTot],[],
+    ['PASIVO','',''],['Por pagar (proveedores y préstamos recibidos)','',b.pasivoTot],
+    ['Total pasivo','',b.pasivoTot],[],
+    ['PATRIMONIO','',''],['Capital aportado (acumulado)','',b.capitalNeto],
+    ['Utilidad acumulada histórica','',b.utilidadAcumulada],['Total patrimonio','',b.patrimonioCalc],[],
+    ['Activo − Pasivo (patrimonio por diferencia)','',b.patrimonioPorDiferencia],
+    ['Diferencia a revisar','',b.diferencia]];
+  generarCSV('balance_general',filas);
 }
 function exportResumen(){
   Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO)]).then(function(r){
@@ -8615,14 +8748,33 @@ function confirmarCobro(movId){
 /* [FINANZAS] Gasto o retiro de caja */
 /* Clases de salida de dinero */
 /* [INGRESO NO-VENTA] dinero que entra por concepto distinto a ventas */
+/* "Saldo inicial" es con lo que arranca el negocio en la app: se guarda con
+   su propia clase 'saldo_inicial' (no 'otro_ingreso', para no confundirlo
+   con plata que de verdad se ganó — ver confirmarIngreso) y, para el
+   Balance de Resumen, cuenta como Patrimonio igual que "Aporte del dueño"
+   (ver capitalNeto en renderResumen): es capital del dueño, solo que es el
+   del primer día. */
 var CAT_INGRESO=['Saldo inicial','Aporte del dueño','Préstamo recibido','Devolución de proveedor','Venta de activo','Otro ingreso'];
 function optsCatIngreso(){ return CAT_INGRESO.map(function(c){return '<option value="'+esc(c)+'">'+esc(c)+'</option>';}).join('')+'<option value="__nueva__">➕ Otro (escribir)</option>'; }
-function onCambioCatIngreso(){ vt_gId('in-cat-nueva-wrap').style.display=(vt_gId('in-cat').value==='__nueva__')?'block':'none'; }
+function onCambioCatIngreso(){
+  var cat=vt_gId('in-cat').value;
+  vt_gId('in-cat-nueva-wrap').style.display=(cat==='__nueva__')?'block':'none';
+  /* [PRÉSTAMO RECIBIDO] pide de quién y para cuándo, porque además del
+     ingreso de caja/banco se va a crear una deuda pendiente en Cuentas
+     por pagar (ver confirmarIngreso) — igual que cualquier otra deuda,
+     esta también se debe poder ir abonando. */
+  var esPrestamo=(cat==='Préstamo recibido');
+  var w=vt_gId('in-prestamo-wrap'); if(w)w.style.display=esPrestamo?'block':'none';
+}
 function onCambioDestinoIngreso(){ vt_gId('in-banco-wrap').style.display=(vt_gId('in-destino').value==='bancos')?'block':'none'; var bm=vt_gId('in-bm-wrap'); if(bm)bm.style.display=(vt_gId('in-destino').value==='caja')?'block':'none'; }
 function abrirIngreso(){
   abrirModal('<h3>➕ Ingreso (no es venta)</h3>'+
     '<div><label>Tipo de ingreso</label><select id="in-cat" onchange="onCambioCatIngreso()">'+optsCatIngreso()+'</select></div>'+
     '<div id="in-cat-nueva-wrap" style="display:none;margin-top:10px"><label>Especifica</label><input type="text" id="in-cat-nueva" placeholder="Concepto del ingreso"></div>'+
+    '<div id="in-prestamo-wrap" style="display:none;margin-top:10px;padding:10px;background:var(--crema2);border-radius:8px">'+
+      '<p style="font-size:.74rem;color:var(--gris);margin-bottom:8px">Como es un préstamo, además de entrar la plata queda una deuda en «Cuentas por pagar» que puedes ir abonando.</p>'+
+      '<label>¿Quién te prestó?</label><input type="text" id="in-prestamista" placeholder="Ej: Banco, un familiar…">'+
+      '<div style="margin-top:8px"><label>Vence (opcional)</label><input type="date" id="in-prestamo-vence"></div></div>'+
     '<div style="margin-top:10px"><label>¿A dónde entra?</label><select id="in-destino" onchange="onCambioDestinoIngreso()">'+
       '<option value="caja">💵 Caja (efectivo)</option><option value="bancos">🏦 Bancos</option></select></div>'+
     '<div id="in-banco-wrap" style="display:none;margin-top:10px"><label>Banco</label>'+selectorBancoHTML('in')+'</div>'+
@@ -8632,6 +8784,17 @@ function abrirIngreso(){
     '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="confirmarIngreso()">Registrar ingreso</button>'+
     '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>');
 }
+/* [CLASE de los ingresos que no son venta] Antes los cinco tipos de
+   CAT_INGRESO se guardaban todos igual, con clase:'otro_ingreso', y esa
+   clase se sumaba entera a la utilidad neta en Cierres (ver
+   calcularPeriodo → ingresosNoVenta). Pero meter capital propio o recibir
+   un préstamo no es ganar plata vendiendo: es capital (tuyo) o deuda (que
+   toca pagar). Ahora:
+     - 'Aporte del dueño'    → clase:'capital'    (Patrimonio, no utilidad)
+     - 'Préstamo recibido'   → clase:'financiero' (Pasivo, no utilidad) +
+                                se crea también la deuda pendiente
+     - el resto (Devolución de proveedor, Venta de activo, Otro ingreso)
+       sigue igual que antes: clase:'otro_ingreso', sí cuenta como ganancia. */
 function confirmarIngreso(){
   var sel=vt_gId('in-cat').value;
   var categoria=(sel==='__nueva__')?(vt_gId('in-cat-nueva').value.trim()||'Otro ingreso'):sel;
@@ -8640,9 +8803,24 @@ function confirmarIngreso(){
   var monto=Number(vt_gId('in-monto').value)||0;
   var detalle=vt_gId('in-detalle').value.trim();
   if(monto<=0){ toast('Monto inválido','err'); return; }
+  var esSaldoInicial=(categoria==='Saldo inicial');
+  var esAporte=(categoria==='Aporte del dueño');
+  var esPrestamo=(categoria==='Préstamo recibido');
+  var clase=esSaldoInicial?'saldo_inicial':(esAporte?'capital':(esPrestamo?'financiero':'otro_ingreso'));
   var bm=(destino==='caja')?leerBilleteMoneda('in',monto):{billete:0,moneda:0};
-  dbPut(STORE_FINANZAS,{id:uid(),cuenta:destino,tipo:'ingreso',clase:(categoria==='Saldo inicial'?'saldo_inicial':'otro_ingreso'),categoria:categoria,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||categoria,cliente:null,billete:bm.billete,moneda:bm.moneda,ts:Date.now()})
-    .then(function(){ toast('Ingreso registrado','ok'); cerrarModal(); refrescarTodo(); });
+  var registro={id:uid(),cuenta:destino,tipo:'ingreso',clase:clase,categoria:categoria,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||categoria,cliente:null,billete:bm.billete,moneda:bm.moneda,ts:Date.now()};
+  dbPut(STORE_FINANZAS,registro).then(function(){
+    if(!esPrestamo)return null;
+    /* la deuda queda igual que una cuenta por pagar cualquiera: aparece en
+       Cuentas por pagar, se puede abonar con abrirPagoCuenta, y como su
+       clase ya es 'financiero' ese pago tampoco tocará la utilidad. */
+    var prestamista=(vt_gId('in-prestamista')&&vt_gId('in-prestamista').value.trim())||'Préstamo recibido';
+    var vence=(vt_gId('in-prestamo-vence')&&vt_gId('in-prestamo-vence').value)||null;
+    return dbPut(STORE_FINANZAS,{id:uid(),cuenta:'pagar',tipo:'pendiente',clase:'financiero',categoria:'Préstamo recibido',rubro:'Préstamo recibido',producto:null,monto:monto,fecha:hoyISO(),vence:vence,proveedor:prestamista,banco:null,ref:detalle||('Préstamo de '+prestamista),cliente:null,ts:Date.now()});
+  }).then(function(){
+    toast(esPrestamo?'Ingreso registrado y quedó como deuda pendiente en Cuentas por pagar':'Ingreso registrado','ok');
+    cerrarModal(); refrescarTodo();
+  });
 }
 
 /* ===== CUENTAS POR PAGAR ===== */
@@ -8689,9 +8867,16 @@ function abrirPagoCuenta(movId){
   dbGet(STORE_FINANZAS,movId).then(function(m){
     if(!m)return;
     var yaClasificada=!!m.clase;
+    /* [FINANCIERO] pagar un préstamo recibido no es un gasto operativo —
+       es devolver plata que no era tuya. La etiqueta lo deja claro y,
+       como confirmarPagoCuenta reutiliza este mismo m.clase, ese pago
+       tampoco se resta de la utilidad (ver renderReportes/calcularPeriodo). */
+    var etiquetaClase=(m.clase==='produccion')?'🏭 Compra de producción'
+      :(m.clase==='financiero')?'💼 Préstamo (no es gasto, no resta utilidad)'
+      :(m.clase==='capital')?'💼 Movimiento de capital (no es gasto, no resta utilidad)'
+      :'🧾 Gasto operativo';
     var notaClase=yaClasificada
-      ? '<div style="font-size:.78rem;color:var(--gris);margin-top:2px">'+
-        (m.clase==='produccion'?'🏭 Compra de producción':'🧾 Gasto operativo')+
+      ? '<div style="font-size:.78rem;color:var(--gris);margin-top:2px">'+etiquetaClase+
         (m.categoria?' · '+esc(m.categoria):'')+(m.producto?' · '+esc(m.producto):'')+'</div>'
       : '';
     abrirModal('<h3>💸 Pagar deuda</h3>'+
@@ -9184,8 +9369,14 @@ function calcularPeriodo(desde,hasta){
         return a+(cu*(Number(p.cantidad)||0)); },0); },0);
     var utilidadBruta=ventas-costoVendido;
     var finPeriodo=finanzas.filter(function(m){return enRango(m.fecha,desde,hasta) && !(m.facturaId&&!idsF[m.facturaId]);});
-    var gastosProd={}, gastosOp={}, totalProd=0, totalOp=0, ingresosNoVenta=0;
+    /* [FINANCIERO/CAPITAL] préstamos (dados o recibidos) y aportes/retiros del dueño se
+       separan aparte primero: no son gasto operativo, no son gasto de producción, y no son
+       "otro ingreso" — no tocan la utilidad del periodo para nada. Se acumulan solo para que
+       el Balance (Resumen → Activo/Pasivo/Patrimonio) pueda mostrarlos. */
+    var gastosProd={}, gastosOp={}, totalProd=0, totalOp=0, ingresosNoVenta=0, totalFinanciero=0, totalCapital=0;
     finPeriodo.forEach(function(m){
+      if(m.clase==='financiero'){ totalFinanciero+=(m.tipo==='ingreso'?1:-1)*(Number(m.monto)||0); return; }
+      if(m.clase==='capital'){ totalCapital+=(m.tipo==='ingreso'?1:-1)*(Number(m.monto)||0); return; }
       if(m.tipo==='egreso'){
         var k=m.categoria||m.rubro||'Otros';
         if(m.clase==='produccion'){ gastosProd[k]=(gastosProd[k]||0)+(Number(m.monto)||0); totalProd+=(Number(m.monto)||0); }
@@ -9195,7 +9386,7 @@ function calcularPeriodo(desde,hasta){
     var utilidadNeta=utilidadBruta+ingresosNoVenta-totalOp;
     return {ventas:ventas,numFacturas:facturas.length,costoVendido:costoVendido,utilidadBruta:utilidadBruta,
       gastosProduccion:gastosProd,totalGastosProduccion:totalProd,gastosOperativo:gastosOp,totalGastosOperativo:totalOp,
-      ingresosNoVenta:ingresosNoVenta,utilidadNeta:utilidadNeta};
+      ingresosNoVenta:ingresosNoVenta,utilidadNeta:utilidadNeta,totalFinanciero:totalFinanciero,totalCapital:totalCapital};
   });
 }
 function renderCierres(){
@@ -9299,7 +9490,8 @@ function ejecutarCierre(periodo,desde,hasta){
       utilidad_bruta:flujo.utilidadBruta, ingresos_no_venta:flujo.ingresosNoVenta,
       gastos_produccion:flujo.gastosProduccion, total_gastos_produccion:flujo.totalGastosProduccion,
       gastos_operativo:flujo.gastosOperativo, total_gastos_operativo:flujo.totalGastosOperativo,
-      utilidad_neta:flujo.utilidadNeta, saldo_inicial:saldoInicial, saldo_final:saldoFinal, ts:Date.now()
+      utilidad_neta:flujo.utilidadNeta, total_financiero:flujo.totalFinanciero, total_capital:flujo.totalCapital,
+      saldo_inicial:saldoInicial, saldo_final:saldoFinal, ts:Date.now()
     };
     return dbPut(STORE_CIERRES,registro).then(function(){ cerrarModal(); toast('Mes cerrado correctamente','ok'); renderCierres(); vt_renderInicio(); });
   });
@@ -9738,6 +9930,67 @@ function sembrarDatosViejo(){
   });
 }
 
+/* [MIGRACIÓN 19 sep 2026] Antes de esta corrección, los préstamos a
+   empleados, los aportes del dueño y los préstamos recibidos que ya
+   estaban guardados en Finanzas tenían clase:'operativo' u
+   'otro_ingreso' — lo mismo que un gasto o una venta real — y por eso
+   restaban o sumaban mal la utilidad ya calculada en periodos pasados.
+   El código nuevo (confirmarIngreso, DMPrestamos.prestar) ya guarda los
+   movimientos NUEVOS con la clase correcta desde el día que se instaló
+   esta corrección, pero eso no cambia los movimientos que YA estaban
+   guardados en el celular. Esta función corre UNA SOLA VEZ (con bandera
+   en localStorage, igual que corregirJornalesNomina en obleas.html) y
+   re-clasifica, por categoría exacta, únicamente los movimientos viejos
+   que coinciden con estos tres patrones conocidos — nunca toca un
+   movimiento que ya tenga la clase correcta ni uno de otra categoría.
+   Para "Préstamo recibido" además crea, si falta, la cuenta por pagar
+   correspondiente (antes esos préstamos quedaban sin la deuda
+   registrada). No puede detectar automáticamente un abono manual a un
+   préstamo recibido hecho ANTES de esta corrección (antes no existía
+   la cuenta por pagar para poder pagarle a través de ella) — si ese es
+   el caso, hay que revisarlo a mano una sola vez. */
+function corregirClasificacionFinanzasHistorica(){
+  var FLAG='dm_movimientos_financieros_corregidos_19sep2026';
+  if(localStorage.getItem(FLAG))return Promise.resolve();
+  return dbGetAll(STORE_FINANZAS).then(function(movs){
+    var pagarExistentes={};
+    movs.forEach(function(m){
+      if(m.cuenta==='pagar'&&m.categoria==='Préstamo recibido'){
+        pagarExistentes[String(m.monto)+'|'+String(m.fecha)]=true;
+      }
+    });
+    var porArreglar=[]; var nuevosPagar=[];
+    movs.forEach(function(m){
+      if(m.categoria==='Préstamo a empleado'&&m.clase!=='financiero'){
+        m.clase='financiero'; porArreglar.push(m);
+      } else if(m.categoria==='Aporte del dueño'&&m.clase!=='capital'){
+        m.clase='capital'; porArreglar.push(m);
+      } else if(m.categoria==='Préstamo recibido'&&m.tipo==='ingreso'&&m.clase!=='financiero'){
+        m.clase='financiero'; porArreglar.push(m);
+        var key=String(m.monto)+'|'+String(m.fecha);
+        if(!pagarExistentes[key]){
+          pagarExistentes[key]=true;
+          nuevosPagar.push({
+            id:uid(),cuenta:'pagar',tipo:'pendiente',clase:'financiero',
+            categoria:'Préstamo recibido',rubro:'Préstamo recibido',producto:null,
+            monto:m.monto,fecha:m.fecha,vence:null,
+            proveedor:(m.ref||'Préstamo recibido'),banco:null,
+            ref:(m.ref||('Préstamo de '+m.fecha))+' (deuda agregada automáticamente al corregir)',
+            cliente:null,ts:Date.now()
+          });
+        }
+      }
+    });
+    var proms=porArreglar.map(function(m){return dbPut(STORE_FINANZAS,m);});
+    nuevosPagar.forEach(function(p){proms.push(dbPut(STORE_FINANZAS,p));});
+    return Promise.all(proms);
+  }).then(function(){
+    localStorage.setItem(FLAG,'1');
+  }).catch(function(e){
+    console.error('Error corrigiendo clasificación histórica de Finanzas',e);
+  });
+}
+
 /* ============================================================
    INICIALIZACIÓN
    ============================================================ */
@@ -9752,6 +10005,8 @@ window.addEventListener('DOMContentLoaded',function(){
     return sembrarDatos();
   }).then(function(){
     return sembrarProductosDM();
+  }).then(function(){
+    return corregirClasificacionFinanzasHistorica();
   }).then(function(){
     vt_renderInicio();
     chequearRecordatorioBackup();
@@ -11857,9 +12112,9 @@ var DMCostos = (function () {
       if (ops && ops.length && typeof calcMOporOps === 'function') return calcMOporOps(ops);
     } catch (e) {}
     var c = (typeof cfg !== 'undefined' && cfg) ? cfg : {};
-    return (m1 ? (num(c.maq1m, 70500) + num(c.maq1c, 65000) + num(c.maq1ma, 65000)) : 0) +
-           (m2 ? (num(c.maq2m, 60000) + num(c.maq2c, 60000)) : 0) +
-           (m3 ? (num(c.maq3m, 70500) + num(c.maq3c, 65000) + num(c.maq3ma, 65000)) : 0);
+    return (m1 ? (num(c.maq1m, 65500) + num(c.maq1c, 60000) + num(c.maq1ma, 60000)) : 0) +
+           (m2 ? (num(c.maq2m, 55000) + num(c.maq2c, 55000)) : 0) +
+           (m3 ? (num(c.maq3m, 65500) + num(c.maq3c, 60000) + num(c.maq3ma, 60000)) : 0);
   }
 
   /* ── Consumo de insumos, corregido por presentación ──────────────────── */
@@ -12523,7 +12778,22 @@ var DMPrestamos = (function () {
      ese «banco» (singular, sin nombre real) se guardaba directo en
      mov.cuenta — como la app solo reconoce el valor 'bancos' (plural) para
      sumar el total de bancos, el préstamo nunca se restaba de ningún banco:
-     quedaba huérfano en Finanzas sin afectar ningún saldo. */
+     quedaba huérfano en Finanzas sin afectar ningún saldo.
+
+     [CLASE 'financiero'] Antes este movimiento se guardaba con
+     clase:'operativo', y ventas.html resta TODO lo que sea 'operativo' de
+     la utilidad neta — igual que un gasto real de arriendo o transporte.
+     Pero prestarle plata a un empleado no es un gasto: sigue siendo plata
+     tuya, solo que la tiene él por ahora (se descuenta de su próxima
+     nómina, ver DMPrestamos.abonar y costos.js:liquidar). Con
+     clase:'operativo' la utilidad quedaba más baja de lo real, y esa resta
+     nunca se revertía ni siquiera cuando el empleado ya había pagado todo.
+     clase:'financiero' es una marca especial que ventas.html excluye de
+     los cálculos de utilidad (ver totalGastosOp en renderReportes y
+     calcularPeriodo): el efectivo sí sale de caja/bancos como siempre,
+     pero ya no se cuenta como pérdida. Esa plata prestada vive del lado
+     del Activo (como cuenta por cobrar a empleados) en el Balance de
+     Resumen, no del lado de los gastos. */
   function prestar(nombre, monto, fecha, cuenta, nota, banco) {
     monto = Number(monto) || 0;
     if (!nombre) { avisarP('Escoge el empleado.', 'warn'); return Promise.resolve(null); }
@@ -12537,7 +12807,7 @@ var DMPrestamos = (function () {
 
     var idFin = (typeof uid === 'function' ? uid() : String(Date.now()));
     var mov = {
-      id: idFin, cuenta: cuenta, tipo: 'egreso', clase: 'operativo',
+      id: idFin, cuenta: cuenta, tipo: 'egreso', clase: 'financiero',
       categoria: 'Préstamo a empleado', monto: monto, fecha: fecha,
       facturaId: null, banco: cuenta === 'bancos' ? banco : null, cliente: null,
       ref: 'Préstamo a ' + nombre + (nota ? ' · ' + nota : ''), ts: Date.now()
@@ -17008,7 +17278,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 19/09/2026 04:26</div>
+                margin-top:10px;opacity:.75">Versión del 19/09/2026 19:54</div>
   </div>
 </div>
 
