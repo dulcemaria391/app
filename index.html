@@ -8646,12 +8646,18 @@ function confirmarIngreso(){
 }
 
 /* ===== CUENTAS POR PAGAR ===== */
+/* La clasificación (¿producción o gasto operativo? ¿en qué rubro?) se pide
+   AQUÍ, al registrar la deuda — no al pagarla. Cuando la cuenta por pagar
+   viene de una compra de insumos en Bodega, ya llega clasificada sola (ver
+   DMBodega.porPagar) y esta pantalla no se usa para eso; esta es para una
+   deuda que se anota a mano (una cuenta de servicios, un encargo, etc.). */
 function abrirCuentaPagar(){
   abrirModal('<h3>➕ Cuenta por pagar</h3>'+
     '<p style="font-size:.82rem;color:var(--gris);margin-bottom:10px">Registra una deuda. El dinero NO sale hasta que la marques como pagada.</p>'+
     '<div><label>Proveedor / a quién le debes</label><input type="text" id="cp-proveedor" placeholder="Ej: Distribuidora La 14"></div>'+
     '<div class="fg c2" style="margin-top:10px"><div><label>Monto</label><input type="number" id="cp-monto" placeholder="0"></div>'+
     '<div><label>Vence</label><input type="date" id="cp-vence"></div></div>'+
+    '<div style="margin-top:10px">'+bloqueClaseHTML('cp')+'</div>'+
     '<div style="margin-top:10px"><label>Concepto (opcional)</label><input type="text" id="cp-concepto" placeholder="Ej: 10 bultos de harina"></div>'+
     '<div class="btn-row"><button class="btn btn-primary btn-sm" onclick="confirmarCuentaPagar()">Registrar deuda</button>'+
     '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>');
@@ -8661,21 +8667,40 @@ function confirmarCuentaPagar(){
   var monto=Number(vt_gId('cp-monto').value)||0;
   var vence=vt_gId('cp-vence').value||null;
   var concepto=vt_gId('cp-concepto').value.trim();
+  var cl=leerClasificacion('cp');
   if(!proveedor){ toast('Escribe el proveedor','err'); return; }
   if(monto<=0){ toast('Monto inválido','err'); return; }
-  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'pagar',tipo:'pendiente',monto:monto,fecha:hoyISO(),vence:vence,proveedor:proveedor,banco:null,ref:concepto||'Deuda',cliente:null,ts:Date.now()})
+  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'pagar',tipo:'pendiente',clase:cl.clase,categoria:cl.categoria,rubro:cl.rubro,producto:cl.producto,monto:monto,fecha:hoyISO(),vence:vence,proveedor:proveedor,banco:null,ref:concepto||cl.rubro||'Deuda',cliente:null,ts:Date.now()})
     .then(function(){ toast('Cuenta por pagar registrada','ok'); cerrarModal(); refrescarTodo(); });
 }
 /* pagar una deuda: elige caja/banco + clase + rubro */
+/* Pagar una cuenta por pagar. La clasificación (producción/operativo, rubro,
+   producto) ya se decidió al REGISTRAR la deuda —en Bodega automático, o a
+   mano en «➕ Cuenta por pagar»—, así que si el registro ya la trae, aquí
+   solo se muestra como recordatorio y NO se vuelve a preguntar: solo hace
+   falta saber de dónde sale la plata. Antes se preguntaba otra vez desde
+   cero, con «Gasto operativo» de opción por defecto — así que pagar una
+   deuda de insumos (que SÍ es costo de producción) podía quedar mal
+   contabilizada como gasto operativo si nadie se acordaba de cambiar el
+   selector. Una deuda muy vieja, de antes de este arreglo, puede no traer
+   clasificación guardada: para esas sí se sigue preguntando, para no
+   perder ese dato. */
 function abrirPagoCuenta(movId){
   dbGet(STORE_FINANZAS,movId).then(function(m){
     if(!m)return;
+    var yaClasificada=!!m.clase;
+    var notaClase=yaClasificada
+      ? '<div style="font-size:.78rem;color:var(--gris);margin-top:2px">'+
+        (m.clase==='produccion'?'🏭 Compra de producción':'🧾 Gasto operativo')+
+        (m.categoria?' · '+esc(m.categoria):'')+(m.producto?' · '+esc(m.producto):'')+'</div>'
+      : '';
     abrirModal('<h3>💸 Pagar deuda</h3>'+
-      '<p style="font-size:.86rem;margin-bottom:12px">A <strong>'+esc(m.proveedor||'')+'</strong> · <strong>'+fmtMoneda(m.monto)+'</strong>'+(m.ref?' ('+esc(m.ref)+')':'')+'</p>'+
-      '<div><label>¿De dónde pagas?</label><select id="pc-medio" onchange="onCambioPagoCuenta()">'+
+      '<p style="font-size:.86rem;margin-bottom:2px">A <strong>'+esc(m.proveedor||'')+'</strong> · <strong>'+fmtMoneda(m.monto)+'</strong>'+(m.ref?' ('+esc(m.ref)+')':'')+'</p>'+
+      notaClase+
+      '<div style="margin-top:10px"><label>¿De dónde pagas?</label><select id="pc-medio" onchange="onCambioPagoCuenta()">'+
         '<option value="caja">💵 Caja (efectivo)</option><option value="bancos">🏦 Bancos</option></select></div>'+
       '<div id="pc-banco-wrap" style="display:none;margin-top:10px"><label>Banco</label>'+selectorBancoHTML('pc')+'</div>'+
-      '<div style="margin-top:10px">'+bloqueClaseHTML('pc')+'</div>'+
+      (yaClasificada?'':'<div style="margin-top:10px">'+bloqueClaseHTML('pc')+'</div>')+
       '<input type="hidden" id="pc-monto" value="'+(Number(m.monto)||0)+'">'+
       bloqueBilleteMonedaHTML('pc')+
       '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="confirmarPagoCuenta(\''+movId+'\')">Confirmar pago</button>'+
@@ -8690,9 +8715,11 @@ function onCambioPagoCuenta(){
 function confirmarPagoCuenta(movId){
   var medio=vt_gId('pc-medio').value;
   var banco=(medio==='bancos')?leerBanco('pc'):null;
-  var cl=leerClasificacion('pc');
   dbGet(STORE_FINANZAS,movId).then(function(m){
     if(!m)return;
+    /* si la deuda ya venía clasificada, se usa esa; si no (una deuda vieja,
+       de antes de este arreglo), se lee del formulario que sí se mostró */
+    var cl=m.clase?{clase:m.clase,categoria:m.categoria,rubro:m.rubro,producto:m.producto}:leerClasificacion('pc');
     var bm=(medio==='caja')?leerBilleteMoneda('pc',Number(m.monto)||0):{billete:0,moneda:0};
     var t=DB.transaction([STORE_FINANZAS],'readwrite'); var sFi=t.objectStore(STORE_FINANZAS);
     /* borra la deuda pendiente y crea el egreso real con su clasificación */
@@ -12487,19 +12514,32 @@ var DMPrestamos = (function () {
     }).filter(function (e) { return e.saldo > 0.5; });
   }
 
-  /* Prestar: sale la plata y queda la deuda */
-  function prestar(nombre, monto, fecha, cuenta, nota) {
+  /* Prestar: sale la plata y queda la deuda.
+
+     'cuenta' es siempre 'caja' o 'bancos' (los dos únicos valores que el
+     resto de Finanzas sabe sumar/restar — ver kpi-finanzas en ventas.html).
+     'banco' es el NOMBRE del banco de verdad (Bancolombia, Nequi…), solo
+     cuando cuenta==='bancos'. Antes el selector solo tenía «Caja»/«Banco» y
+     ese «banco» (singular, sin nombre real) se guardaba directo en
+     mov.cuenta — como la app solo reconoce el valor 'bancos' (plural) para
+     sumar el total de bancos, el préstamo nunca se restaba de ningún banco:
+     quedaba huérfano en Finanzas sin afectar ningún saldo. */
+  function prestar(nombre, monto, fecha, cuenta, nota, banco) {
     monto = Number(monto) || 0;
     if (!nombre) { avisarP('Escoge el empleado.', 'warn'); return Promise.resolve(null); }
     if (monto <= 0) { avisarP('El monto debe ser mayor que cero.', 'warn'); return Promise.resolve(null); }
     fecha = fecha || hoyISO3();
-    cuenta = cuenta || 'caja';
+    cuenta = (cuenta === 'bancos') ? 'bancos' : 'caja';
+    if (cuenta === 'bancos' && !banco) {
+      avisarP('Escoge el banco de donde sale el préstamo.', 'warn');
+      return Promise.resolve(null);
+    }
 
     var idFin = (typeof uid === 'function' ? uid() : String(Date.now()));
     var mov = {
       id: idFin, cuenta: cuenta, tipo: 'egreso', clase: 'operativo',
       categoria: 'Préstamo a empleado', monto: monto, fecha: fecha,
-      facturaId: null, banco: cuenta === 'caja' ? null : cuenta, cliente: null,
+      facturaId: null, banco: cuenta === 'bancos' ? banco : null, cliente: null,
       ref: 'Préstamo a ' + nombre + (nota ? ' · ' + nota : ''), ts: Date.now()
     };
     var g = (typeof dbPut === 'function' && typeof STORE_FINANZAS !== 'undefined')
@@ -12509,13 +12549,14 @@ var DMPrestamos = (function () {
       var a = leer();
       a.unshift({
         id: 'p' + Date.now(), empleado: nombre, tipo: 'prestamo', monto: monto,
-        fecha: fecha, cuenta: cuenta, nota: nota || '', finanzaId: idFin, ts: Date.now()
+        fecha: fecha, cuenta: cuenta, banco: cuenta === 'bancos' ? banco : null,
+        nota: nota || '', finanzaId: idFin, ts: Date.now()
       });
       guardar(a);
       pintar();
       try { if (window.DMNomina) DMNomina.pintar(); } catch (e) {}
       avisarP('Préstamo de ' + pesos3(monto) + ' registrado a ' + nombre +
-              '. Salió de ' + (cuenta === 'caja' ? 'caja' : cuenta) +
+              '. Salió de ' + (cuenta === 'caja' ? 'caja' : banco) +
               ' y se descontará de su nómina.', 'ok');
       return mov;
     });
@@ -12563,8 +12604,18 @@ var DMPrestamos = (function () {
     if (actual) sel.value = actual;
   }
 
+  /* El selector de banco de verdad (con la lista real de bancos y la opción
+     de agregar uno nuevo) — el mismo que ya usan Bodega y Cuentas por pagar,
+     reutilizado aquí en vez de un select fijo de dos opciones sin nombres. */
+  function pintarBancoSel() {
+    var cont = document.getElementById('dm-prest-banco-sel');
+    if (!cont || typeof selectorBancoHTML !== 'function') return;
+    cont.innerHTML = selectorBancoHTML('dm-prest', '');
+  }
+
   function pintar() {
     pintarSelector();
+    pintarBancoSel();
     var caja = document.getElementById('dm-prest-saldos');
     if (!caja) return;
     var s = saldos();
@@ -12579,13 +12630,27 @@ var DMPrestamos = (function () {
       'margin-top:6px;padding-top:6px"><strong>Total prestado</strong><strong>' + pesos3(total) + '</strong></div>';
   }
 
+  /* Muestra/oculta el selector de banco según lo que se escoja en «Sale de».
+     Se cuelga en window para que el onchange del HTML (shell_footer.html)
+     la encuentre sin importar en qué módulo esté parado el usuario. */
+  function onCambioPrestCuenta() {
+    var sel = document.getElementById('dm-prest-cuenta');
+    var wrap = document.getElementById('dm-prest-banco-wrap');
+    if (!sel || !wrap) return;
+    var esBanco = sel.value === 'bancos';
+    wrap.style.display = esBanco ? '' : 'none';
+    if (esBanco) pintarBancoSel();
+  }
+  try { window.onCambioPrestCuenta = onCambioPrestCuenta; } catch (e) {}
+
   function registrarDesdeUI() {
     var nombre = (document.getElementById('dm-prest-emp') || {}).value;
     var monto = (document.getElementById('dm-prest-monto') || {}).value;
     var fecha = (document.getElementById('dm-prest-fecha') || {}).value;
     var cuenta = (document.getElementById('dm-prest-cuenta') || {}).value;
     var nota = (document.getElementById('dm-prest-nota') || {}).value;
-    return prestar(nombre, monto, fecha, cuenta, nota).then(function (r) {
+    var banco = (cuenta === 'bancos' && typeof leerBanco === 'function') ? leerBanco('dm-prest') : '';
+    return prestar(nombre, monto, fecha, cuenta, nota, banco).then(function (r) {
       if (r) {
         ['dm-prest-monto', 'dm-prest-nota'].forEach(function (id) {
           var e = document.getElementById(id); if (e) e.value = '';
@@ -12598,7 +12663,8 @@ var DMPrestamos = (function () {
   return {
     leer: leer, empleados: empleados, saldo: saldo, saldos: saldos,
     prestar: prestar, abonar: abonar, pintar: pintar,
-    pintarSelector: pintarSelector, registrar: registrarDesdeUI
+    pintarSelector: pintarSelector, pintarBancoSel: pintarBancoSel,
+    onCambioPrestCuenta: onCambioPrestCuenta, registrar: registrarDesdeUI
   };
 })();
 
@@ -15042,12 +15108,22 @@ var DMBodega = (function () {
   }
 
   /* La deuda con el proveedor, con la MISMA forma que usa la pantalla de
-     Cuentas por pagar de Ventas. Asi el boton «Pagada» que ya existe funciona
-     sobre esta sin tocar nada mas. */
+     Cuentas por pagar de Ventas. Asi el boton «Pagar» que ya existe funciona
+     sobre esta sin tocar nada mas.
+
+     Va clasificada desde YA (clase/categoria/rubro/producto), igual que la
+     compra de contado (ver egreso() arriba): es material de bodega, siempre
+     es costo de producción. Antes esto no se guardaba aqui, asi que al
+     pagar la deuda mas adelante la pantalla de Finanzas tenia que volver a
+     preguntar «¿que tipo de pago es?» sin saberlo — y por defecto quedaba
+     marcado como gasto operativo, no como costo de produccion, si nadie se
+     acordaba de cambiarlo. Guardandolo aqui, quien compra da la informacion
+     UNA sola vez, y quien paga despues solo dice de donde salio la plata. */
   function porPagar(monto, prov, fecha, vence, nombre, compraId) {
     if (!hayFinanzas() || !(monto > 0)) return Promise.resolve(true);
     return dbPut(STORE_FINANZAS, {
       id: nuevoId(), cuenta: 'pagar', tipo: 'pendiente',
+      clase: 'produccion', categoria: 'Insumos', rubro: 'Compra de insumos', producto: nombre,
       monto: monto, fecha: fecha, vence: vence || '',
       proveedor: prov, banco: null,
       ref: 'Compra de ' + nombre, cliente: null, compraId: compraId || null, ts: Date.now()
@@ -16932,7 +17008,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 15/09/2026 21:45</div>
+                margin-top:10px;opacity:.75">Versión del 19/09/2026 04:26</div>
   </div>
 </div>
 
@@ -16969,8 +17045,12 @@ var DMDemo = (function () {
         </div>
         <div style="flex:1">
           <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Sale de</div>
-          <select id="dm-prest-cuenta"><option value="caja">Caja</option><option value="banco">Banco</option></select>
+          <select id="dm-prest-cuenta" onchange="onCambioPrestCuenta()"><option value="caja">Caja</option><option value="bancos">Banco</option></select>
         </div>
+      </div>
+      <div id="dm-prest-banco-wrap" style="display:none;margin-top:8px">
+        <div style="font-size:10.5px;color:var(--dm-gris);margin-bottom:4px">Banco</div>
+        <div id="dm-prest-banco-sel"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
         <div style="flex:1">
