@@ -4239,7 +4239,9 @@ async function ob_calcNomina(){
       var pago=getWorkerPago(nombre);
       w.bruto=w.turnos*pago;
       w.bono=w.turnos*DESCUENTO_BONO;
-      w.neto=w.bruto-w.bono;
+      /* [CORRECCIÓN 20 sep 2026] el bono se guarda aparte, no se resta del
+         pago de hoy — ver el mismo comentario en DMNomina.calcular, costos.js */
+      w.neto=w.bruto;
       if(!bonos[nombre])bonos[nombre]=0;
       activos.push(w);
     } else { inactivos.push(w); }
@@ -4332,7 +4334,9 @@ async function expNomina(){
     const pago=getWorkerPago(w.nombre);
     const bruto=w.turnos*pago;
     const bono=w.turnos*DESCUENTO_BONO;
-    const neto=bruto-bono;
+    /* [CORRECCIÓN 20 sep 2026] el bono se guarda aparte, no se resta del
+       pago de hoy — ver el mismo comentario en DMNomina.calcular, costos.js */
+    const neto=bruto;
     const bonoAcum=bonos[w.nombre]||0;
     rows.push([q(w.nombre),q(w.rol),q(getMaqName(w.maq)),q(w.turnos),q(pago),q(bruto),q(bono),q(neto),q(bonoAcum)].join(sep));
   });
@@ -12480,7 +12484,18 @@ var DMNomina = (function () {
       w.valorTurno = pago;
       w.bruto = pago * w.turnos;
       w.bono = desc * w.turnos;
-      w.neto = w.bruto - w.bono;
+      /* [CORRECCIÓN 20 sep 2026] El bono ($5.000/turno) se GUARDA aparte
+         (se acumula en obleas_bonos y se paga en diciembre — ver el aviso
+         de la pestaña Nómina), pero eso no significa que se le RESTE al
+         pago de hoy. Antes esta línea decía w.neto=w.bruto-w.bono, así que
+         un trabajador con jornal $60.000 y 9 turnos terminaba viendo
+         $495.000 en vez de los $540.000 completos (60.000×9) — la
+         aclaración de la dueña: "el valor es el valor del día... el bono
+         se guarda, no se paga [de menos hoy]". Lo que se paga HOY es el
+         bruto completo; el bono sigue apareciendo en su propia columna y
+         se sigue acumulando igual que antes (ver liquidar() más abajo),
+         solo que ya no se descuenta del pago. */
+      w.neto = w.bruto;
       /* deuda pendiente: se descuenta del neto, tope el propio neto */
       w.prestamo = (window.DMPrestamos ? DMPrestamos.saldo(n) : 0);
       w.descuento = Math.min(w.prestamo, w.neto);
@@ -17278,7 +17293,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 19/09/2026 19:56</div>
+                margin-top:10px;opacity:.75">Versión del 20/09/2026 01:39</div>
   </div>
 </div>
 
