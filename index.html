@@ -2740,6 +2740,55 @@ function corregirJornalesNomina(){
     localStorage.setItem('obleas_jornales_corregidos_19sep2026','1');
   }catch(e){}
 }
+/* [CORRECCIÓN 20 sep 2026] El desglose guardado en la pestaña 🧮 Costos
+   (obleas_costo_historial) NO se recalcula solo — cada vez que se guarda un
+   "Calcular y guardar desglose" queda como una FOTO fija de ese momento
+   (cHar/cFij/cGas/cMO/cOtros/cArr/total, ya redondeados, en pesos). Los
+   turnos en sí no guardan ningún costo (solo paquetes/harina/gas/operarios
+   — el costo se calcula al vuelo cada vez, por eso Nómina y el costeo por
+   turno de Reportes ya mostraban bien los jornales corregidos), pero un
+   desglose que YA se había guardado en esta pestaña antes del 19-sep-2026
+   se quedó con el "👷 Mano de obra" (cMO) calculado con los jornales
+   VIEJOS y equivocados — y por lo tanto con un total y unos porcentajes
+   también viejos, aunque `cfg` ya esté corregido. Esta migración corre UNA
+   SOLA VEZ (con su propia bandera, mismo mecanismo que
+   corregirJornalesNomina) y recalcula, para cada desglose ya guardado con
+   sus operarios anotados, SOLO la mano de obra (con los jornales de HOY,
+   ya corregidos, MÁS el bono — ver la nota de calcMOporOps más arriba) —
+   harina/insumos/gas/otros fijos/arriendo no cambiaron y se dejan tal cual
+   estaban guardados — y con eso arma de nuevo el total y los porcentajes.
+   Un desglose sin operarios guardados (de antes de que se empezara a
+   guardar ese dato) no se puede recalcular con certeza, así que se deja
+   intacto.
+   [21 sep 2026] La bandera se cambió de '...20sep2026' a '...21sep2026':
+   la primera vuelta de esta migración (20 sep) corrigió el jornal pero
+   todavía no incluía el bono en el costo — la dueña aclaró después que el
+   bono SÍ debe contar como costo. Con la bandera nueva, esta migración
+   vuelve a correr una vez más en TODOS los celulares (hayan corrido ya la
+   del 20 sep o no) y deja el costo de mano de obra bien, con jornal+bono. */
+function corregirCostoHistoricoManoDeObra(){
+  try{
+    if(localStorage.getItem('obleas_costo_historial_mo_corregido_21sep2026'))return;
+    var hist=getCostoHistorial();
+    var cambio=false;
+    hist.forEach(function(h){
+      if(!h.operarios||!h.paqEq)return;
+      var ops=String(h.operarios).split(',').map(function(s){return s.trim();}).filter(Boolean);
+      if(!ops.length)return;
+      var moT=calcMOporOps(ops);
+      var nuevoCMO=Math.round(moT/h.paqEq);
+      if(nuevoCMO===h.cMO)return;
+      var nuevoTotal=(h.cHar||0)+(h.cFij||0)+(h.cGas||0)+nuevoCMO+(h.cOtros||0)+(h.cArr||0);
+      var pct=function(v){return nuevoTotal>0?(v/nuevoTotal*100).toFixed(1)+'%':'0%';};
+      h.cMO=nuevoCMO; h.total=nuevoTotal;
+      h.pctHar=pct(h.cHar); h.pctFij=pct(h.cFij); h.pctGas=pct(h.cGas);
+      h.pctMO=pct(nuevoCMO); h.pctOtros=pct(h.cOtros); h.pctArr=pct(h.cArr);
+      cambio=true;
+    });
+    if(cambio)saveCostoHistorial(hist);
+    localStorage.setItem('obleas_costo_historial_mo_corregido_21sep2026','1');
+  }catch(e){console.error('corregirCostoHistoricoManoDeObra:',e);}
+}
 function loadCfg(){
   try{
     corregirJornalesNomina();
@@ -2749,6 +2798,18 @@ function loadCfg(){
     var key=localStorage.getItem('obleas_apikey')||'';
     var elKey=document.getElementById('cfg-apikey');if(elKey)elKey.value=key;
     updApiStatus(key);
+    /* [20 sep 2026] corregirCostoHistoricoManoDeObra() usa WORKERS y
+       COSTO_HIST_KEY, que se declaran MAS ABAJO en este mismo archivo
+       (con "var"). La primera vez que se llama loadCfg() es al arrancar
+       la app (antes de que el resto del script termine de correr), asi
+       que en ese momento esas variables todavia no tienen su valor
+       asignado (solo estan "hoisteadas", en undefined) y la migracion no
+       encontraria nada que corregir. Con setTimeout(...,0) se difiere la
+       llamada al siguiente tick, cuando TODO el script del modulo ya
+       termino de ejecutarse y esas variables ya estan listas. */
+    setTimeout(function(){
+      try{corregirCostoHistoricoManoDeObra();}catch(e){console.error('corregirCostoHistoricoManoDeObra:',e);}
+    },0);
   }catch(e){console.error('loadCfg:',e);}
 }
 function guardarCfg(){
@@ -3633,6 +3694,14 @@ async function delDia(fecha){
 async function delReg(id){if(!confirm('¿Eliminar este registro?'))return;const arr=getTurnos().filter(r=>r.id!==id);saveTurnos(arr);delete fotosMap[id];renderRegs();}
 
 // ── COSTOS ───────────────────────────────────────────
+/* [21 sep 2026] La dueña aclaró: el bono de $5.000/turno SÍ hace parte del
+   COSTO de mano de obra (a diferencia del pago de nómina de hoy, que
+   deliberadamente lo deja aparte — ver el punto 25/26 del historial). Si a
+   alguien se le paga 60.000 de turno + 5.000 de bono, el costo debe
+   considerar 65.000 de mano de obra por ese turno. Por eso aquí SÍ se suma
+   DESCUENTO_BONO por cada operario encontrado — getWorkerPago() en cambio
+   sigue devolviendo solo el jornal, porque a él lo sigue usando también
+   DMNomina.calcular() para el pago de hoy, que no debe incluir el bono. */
 function calcMOporOps(ops){
   var total=0;
   var usados=[];
@@ -3652,12 +3721,17 @@ function calcMOporOps(ops){
     }
     if(found&&usados.indexOf(found.nombre)<0){
       usados.push(found.nombre);
-      total+=getWorkerPago(found.nombre);
+      total+=getWorkerPago(found.nombre)+DESCUENTO_BONO;
     }
   });
   return total;
 }
-function calcCostoVal(paq,harKg,gasCons,m1,m2,m3,ops,comb1,comb2,comb3){if(!paq)return 0;const paqEq=paq+((comb1||0)+(comb2||0)+(comb3||0))*(20/50);const cHar=paqEq>0?(harKg*(cfg.bulto/50))/paqEq:(harKg*(cfg.bulto/50))/paq;const cFij=cfg.lec+cfg.adi+cfg.ades+cfg.ico+cfg.bol;const cGas=(gasCons*cfg.mgas)/paqEq;var moT;if(ops&&ops.length){moT=calcMOporOps(ops);}else{moT=(m1?(cfg.maq1m+cfg.maq1c+cfg.maq1ma):0)+(m2?(cfg.maq2m+cfg.maq2c):0)+(m3?(cfg.maq3m+cfg.maq3c+cfg.maq3ma):0);}const cMO=moT/paqEq;const cOtros=(cfg.gas2+cfg.jona+cfg.guan+cfg.cin+cfg.caj+cfg.arr)/20/paqEq;const cArrSvc=(cfg.arrs/20)/paqEq;return cHar+cFij+cGas+cMO+cOtros+cArrSvc;}
+/* La rama sin operarios (m1/m2/m3, cuando el turno no trae la lista de
+   quién trabajó) suma el bono por cada puesto de esa máquina, para que el
+   costo quede igual de completo que por la rama de arriba: Máquina 1 y 3
+   tienen 3 puestos (Maquinero+Cortador+Masero), Máquina 2 tiene 2
+   (Maquinero+Cortador, no tiene Masero). */
+function calcCostoVal(paq,harKg,gasCons,m1,m2,m3,ops,comb1,comb2,comb3){if(!paq)return 0;const paqEq=paq+((comb1||0)+(comb2||0)+(comb3||0))*(20/50);const cHar=paqEq>0?(harKg*(cfg.bulto/50))/paqEq:(harKg*(cfg.bulto/50))/paq;const cFij=cfg.lec+cfg.adi+cfg.ades+cfg.ico+cfg.bol;const cGas=(gasCons*cfg.mgas)/paqEq;var moT;if(ops&&ops.length){moT=calcMOporOps(ops);}else{moT=(m1?(cfg.maq1m+cfg.maq1c+cfg.maq1ma+3*DESCUENTO_BONO):0)+(m2?(cfg.maq2m+cfg.maq2c+2*DESCUENTO_BONO):0)+(m3?(cfg.maq3m+cfg.maq3c+cfg.maq3ma+3*DESCUENTO_BONO):0);}const cMO=moT/paqEq;const cOtros=(cfg.gas2+cfg.jona+cfg.guan+cfg.cin+cfg.caj+cfg.arr)/20/paqEq;const cArrSvc=(cfg.arrs/20)/paqEq;return cHar+cFij+cGas+cMO+cOtros+cArrSvc;}
 /* El costo por paquete de UN turno. La nomina paga por turno, asi
    que este es el unico nivel donde el costo es cierto: sumar dos
    turnos y costear el total pagaria la mano de obra una sola vez. */
@@ -12110,15 +12184,23 @@ var DMCostos = (function () {
     };
   }
 
-  /* Mano de obra del día, reutilizando la lógica del módulo de Obleas */
+  /* Mano de obra del día, reutilizando la lógica del módulo de Obleas.
+     [21 sep 2026] El bono de $5.000/turno SÍ hace parte del costo de mano
+     de obra (aclarado por la dueña: 60.000 de turno + 5.000 de bono = 65.000
+     de costo) — calcMOporOps() ya lo suma por cada operario encontrado, así
+     que basta con dejar que esta función siga delegando en ella cuando hay
+     lista de operarios. La rama de respaldo (sin operarios, solo por
+     máquina activa) suma el mismo bono por cada puesto de esa máquina, para
+     no quedar más barata que la rama de arriba. */
   function manoDeObra(ops, m1, m2, m3) {
     try {
       if (ops && ops.length && typeof calcMOporOps === 'function') return calcMOporOps(ops);
     } catch (e) {}
     var c = (typeof cfg !== 'undefined' && cfg) ? cfg : {};
-    return (m1 ? (num(c.maq1m, 65500) + num(c.maq1c, 60000) + num(c.maq1ma, 60000)) : 0) +
-           (m2 ? (num(c.maq2m, 55000) + num(c.maq2c, 55000)) : 0) +
-           (m3 ? (num(c.maq3m, 65500) + num(c.maq3c, 60000) + num(c.maq3ma, 60000)) : 0);
+    var bono = (typeof DESCUENTO_BONO !== 'undefined') ? DESCUENTO_BONO : 5000;
+    return (m1 ? (num(c.maq1m, 65500) + num(c.maq1c, 60000) + num(c.maq1ma, 60000) + 3 * bono) : 0) +
+           (m2 ? (num(c.maq2m, 55000) + num(c.maq2c, 55000) + 2 * bono) : 0) +
+           (m3 ? (num(c.maq3m, 65500) + num(c.maq3c, 60000) + num(c.maq3ma, 60000) + 3 * bono) : 0);
   }
 
   /* ── Consumo de insumos, corregido por presentación ──────────────────── */
@@ -12442,18 +12524,25 @@ var DMNomina = (function () {
     });
 
     if (linea === 'arequipe') {
-      /* Arequipe: dos personas, pago por lote trabajado */
+      /* Arequipe: dos personas, pago por lote trabajado.
+         [CORRECCIÓN 20 sep 2026] Ángel cobra $62.000/turno, y aparte se le
+         GUARDA $5.000/turno de bono — igual que en Obleas, ese bono no se
+         paga hoy junto con el jornal, se acumula aparte (ver ar_bonos en
+         liquidar() más abajo). Antes "ad+ab" pagaba jornal y bono juntos
+         de una vez, lo cual no es lo que corresponde: la dueña aclaró
+         "a él se le pagan 62.000 y además se le guardan 5.000 x turno como
+         bono aparte de los 62.000". Tony no tiene bono (td solo). */
       var ad = valorCampo('nom-angel-dia', 62000), ab = valorCampo('nom-angel-bono', 5000);
       var td = valorCampo('nom-tony-dia', 30000);
       var n = regs.length;
       return {
         linea: linea, periodo: per, turnos: n,
         gente: n ? [
-          { nombre: 'Ángel', turnos: n, valorTurno: ad + ab, bruto: (ad + ab) * n, bono: 0, neto: (ad + ab) * n },
+          { nombre: 'Ángel', turnos: n, valorTurno: ad, bruto: ad * n, bono: ab * n, neto: ad * n },
           { nombre: 'Tony', turnos: n, valorTurno: td, bruto: td * n, bono: 0, neto: td * n }
         ].map(conPrestamo) : [],
-        bruto: (ad + ab + td) * n, bono: 0, neto: (ad + ab + td) * n,
-        descuento: 0, aPagar: (ad + ab + td) * n
+        bruto: (ad + td) * n, bono: ab * n, neto: (ad + td) * n,
+        descuento: 0, aPagar: (ad + td) * n
       };
     }
 
@@ -12590,7 +12679,7 @@ var DMNomina = (function () {
         escribirJSON('obleas_bonos', b);
       } else {
         var p = leerJSON('dm_ar_nom_per', []);
-        var ang = r.gente.filter(function (w) { return w.nombre === 'Ángel'; })[0] || { neto: 0 };
+        var ang = r.gente.filter(function (w) { return w.nombre === 'Ángel'; })[0] || { neto: 0, bono: 0 };
         var ton = r.gente.filter(function (w) { return w.nombre === 'Tony'; })[0] || { neto: 0 };
         p.unshift({
           id: Date.now(), fechaIni: r.periodo.ini, fechaFin: r.periodo.fin,
@@ -12598,6 +12687,13 @@ var DMNomina = (function () {
           fechaPago: hoyISO2()
         });
         escribirJSON('dm_ar_nom_per', p);
+        /* el bono de Ángel también se guarda aparte, igual que en Obleas
+           (ver obleas_bonos arriba) — se acumula aquí, al liquidar */
+        if (ang.bono > 0) {
+          var bAr = leerJSON('ar_bonos', {});
+          bAr['Ángel'] = (Number(bAr['Ángel']) || 0) + ang.bono;
+          escribirJSON('ar_bonos', bAr);
+        }
       }
 
       /* abonar a la deuda de cada quien lo que se le descontó */
@@ -17293,7 +17389,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 20/09/2026 01:39</div>
+                margin-top:10px;opacity:.75">Versión del 21/09/2026 00:14</div>
   </div>
 </div>
 
