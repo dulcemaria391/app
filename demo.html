@@ -1916,6 +1916,7 @@ body{
       <div class="ch-actions">
         <button class="btn btn-primary btn-sm" onclick="abrirFormCliente()">➕ Agregar cliente</button>
         <button class="btn btn-ghost btn-sm" onclick="importarClientesDM()">⬆ Importar lista</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportarDirectorioClientes()">⬇ Exportar teléfonos</button>
       </div>
     </div>
     <div class="buscador">
@@ -1930,6 +1931,7 @@ body{
         <select id="bc-vista" onchange="renderClientes()">
           <option value="lista">Lista (por monto)</option>
           <option value="ciudad">Agrupar por ciudad</option>
+          <option value="directorio">📇 Directorio con teléfono</option>
         </select>
       </div>
     </div>
@@ -7781,9 +7783,11 @@ function renderClientes(){
     var filtroCiudad=vt_gId('bc-ciudad').value;
     var vista=vt_gId('bc-vista').value;
     var periodo=(vt_gId('bc-periodo')&&vt_gId('bc-periodo').value)||'mes';
+    /* [24 sep 2026] Directorio: TODOS los clientes (sin importar el periodo) con su teléfono */
+    if(vista==='directorio') periodo='historico';
     var lista=CACHE_CLIENTES.filter(function(c){
       if(filtroCiudad&&(c.ciudad||'')!==filtroCiudad)return false;
-      if(q&&!((c.nombre||'').toLowerCase().indexOf(q)>=0||(c.identificacion||'').toLowerCase().indexOf(q)>=0))return false;
+      if(q&&!((c.nombre||'').toLowerCase().indexOf(q)>=0||(c.identificacion||'').toLowerCase().indexOf(q)>=0||String(c.telefono||'').indexOf(q)>=0))return false;
       return true;
     });
     /* en modo "mes", solo mostrar clientes que compraron en el periodo en curso */
@@ -7800,6 +7804,20 @@ function renderClientes(){
       if(periodo==='mes'){ cont.innerHTML=avisoPeriodo+emptyState('👥','Sin ventas este mes','Aún no hay compras registradas en el periodo en curso',null); return; }
       cont.innerHTML=emptyState('👥','Aún no hay clientes','Se crean automáticamente al guardar facturas',null); return;
     }
+    if(vista==='directorio'){
+      var dir=lista.slice().sort(function(a,b){ return (a.nombre||'').localeCompare(b.nombre||'','es'); });
+      var conTel=dir.filter(function(c){ return String(c.telefono||'').trim(); }).length;
+      cont.innerHTML='<div style="font-size:.78rem;color:var(--gris);margin-bottom:10px">📇 '+dir.length+' cliente(s) · '+conTel+' con teléfono. <a href="#" onclick="exportarDirectorioClientes();return false">⬇ Exportar</a></div>'+
+        '<div class="tw"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Ciudad</th></tr></thead><tbody>'+
+        dir.map(function(c){
+          var tel=String(c.telefono||'').trim(), telNum=tel.replace(/[^0-9+]/g,'');
+          return '<tr onclick="verCliente(\''+esc(c.id).replace(/'/g,"\\'")+'\')" style="cursor:pointer">'+
+            '<td><strong>'+esc(c.nombre||'Sin nombre')+'</strong>'+(c.direccion?'<div style="font-size:.72rem;color:var(--gris)">'+esc(c.direccion)+'</div>':'')+'</td>'+
+            '<td>'+(tel?'<a href="tel:'+esc(telNum)+'" onclick="event.stopPropagation()">'+esc(tel)+'</a>':'<span style="color:var(--gris)">—</span>')+'</td>'+
+            '<td>'+esc(c.ciudad||'')+'</td></tr>';
+        }).join('')+'</tbody></table></div>';
+      return;
+    }
     if(vista==='ciudad'){
       /* agrupar por ciudad */
       var grupos={};
@@ -7814,6 +7832,24 @@ function renderClientes(){
     } else {
       cont.innerHTML=avisoPeriodo+lista.map(function(c){return tarjetaCliente(c,periodo,ventasMes);}).join('');
     }
+  });
+}
+/* [24 sep 2026] Exporta el directorio de clientes (nombre, teléfono, ciudad,
+   dirección, identificación, correo) a un CSV que abre directo en Excel. */
+function exportarDirectorioClientes(){
+  return dbGetAll(STORE_CLIENTES).then(function(cl){
+    if(!cl.length){ alert('Aún no hay clientes para exportar.'); return; }
+    cl=cl.slice().sort(function(a,b){ return (a.nombre||'').localeCompare(b.nombre||'','es'); });
+    function celda(v){ v=String(v==null?'':v); return /[";\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+    var filas=[['Cliente','Teléfono','Ciudad','Dirección','Identificación','Correo']];
+    cl.forEach(function(c){ filas.push([c.nombre||'',c.telefono||'',c.ciudad||'',c.direccion||'',c.identificacion||'',c.email||'']); });
+    var csv='\ufeff'+filas.map(function(f){ return f.map(celda).join(';'); }).join('\r\n');
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='clientes_telefonos_'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
   });
 }
 function verCliente(id){
@@ -12664,8 +12700,33 @@ var DMNomina = (function () {
   function masUnDia(f) { var d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
   function pesos2(v) { return '$' + Math.round(Number(v) || 0).toLocaleString('es-CO'); }
 
+  /* [24 sep 2026] El corte guardado vive solo en ESTE celular: cuando la
+     dueña pagaba en el principal, el del encargado nunca se enteraba y seguía
+     sumando turnos. Lo que sí viaja entre celulares es el historial de
+     nóminas pagadas (obleas_nom_historial / dm_ar_nom_per), así que el corte
+     efectivo es la fecha más reciente entre el corte local y ese historial. */
+  function esFecha(f) { return /^\d{4}-\d{2}-\d{2}$/.test(String(f || '')); }
+  function corteDeHistorial(linea) {
+    var max = '';
+    if (linea === 'obleas') {
+      leerJSON('demo_obleas_nom_historial', []).forEach(function (h) {
+        if (h && esFecha(h.desde) && esFecha(h.hasta) && h.hasta > max) max = h.hasta;
+      });
+    } else {
+      leerJSON('demo_dm_ar_nom_per', []).forEach(function (p) {
+        if (p && esFecha(p.fechaFin) && p.fechaFin > max) max = p.fechaFin;
+      });
+    }
+    return max;
+  }
   function cortes() {
-    try { return JSON.parse(localStorage.getItem(K_CORTE) || '{}'); } catch (e) { return {}; }
+    var c;
+    try { c = JSON.parse(localStorage.getItem(K_CORTE) || '{}') || {}; } catch (e) { c = {}; }
+    Object.keys(LINEAS).forEach(function (l) {
+      var h = corteDeHistorial(l);
+      if (h && (!c[l] || h > c[l])) c[l] = h;
+    });
+    return c;
   }
   function guardarCorte(linea, fecha) {
     var c = cortes(); c[linea] = fecha;
@@ -12844,6 +12905,7 @@ var DMNomina = (function () {
       if (linea === 'obleas') {
         var h = leerJSON('demo_obleas_nom_historial', []);
         h.unshift({
+          id: 'NO' + Date.now(),   /* llave propia para que viaje al otro celular */
           desde: r.periodo.ini, hasta: r.periodo.fin, ts: new Date().toISOString(),
           turnos: r.turnos, bruto: r.bruto, bono: r.bono, neto: r.neto,
           resumen: resumenHTML(r)
@@ -13436,7 +13498,10 @@ var DMSync = (function () {
       area: 'stock de arequipe producido' },
     { clave: 'demo_dm_prestamos',            llave: function (r) { return 'P' + (r.id || (r.fecha + '|' + r.empleado + '|' + r.monto)); },
       area: 'préstamos' },
-    { clave: 'demo_obleas_nom_historial',    llave: function (r) { return 'NO' + (r.id || r.fechaPago || r.fecha); },
+    { clave: 'demo_obleas_nom_historial',    llave: function (r) {
+        /* [24 sep 2026] los pagos de Obleas no traían id/fechaPago/fecha: todos
+           daban la misma llave «NOundefined» y solo viajaba el primero */
+        return 'NO' + (r.id || r.fechaPago || r.fecha || ((r.desde || '') + '|' + (r.hasta || '') + '|' + (r.ts || ''))); },
       area: 'nóminas pagadas (obleas)' },
     { clave: 'demo_dm_ar_nom_per',           llave: function (r) { return 'NA' + (r.id || r.fechaPago); },
       area: 'nóminas pagadas (arequipe)' },
@@ -17231,8 +17296,18 @@ var DMPermisos = (function () {
         Array.prototype.forEach.call(
           document.querySelectorAll('#mod-arequipe nav button'), function (b) {
             var o = b.getAttribute('onclick') || '';
-            if (o.indexOf("'costos'") >= 0) { b.hidden = true; b.style.display = 'none'; }
+            if (o.indexOf("'costos'") >= 0 || o.indexOf("'costoslote'") >= 0) { b.hidden = true; b.style.display = 'none'; }
           });
+        /* [24 sep 2026] Arequipe tiene una SEGUNDA pestaña de costos
+           («🧮 Costos» = costoslote: costo por lote + desglose detallado) y
+           un botón 🧾 en Reportes que abre ese desglose. Se escapaban. */
+        if (vaciar(document.getElementById('arsec-costoslote'))) quitados.push('costos por lote de arequipe');
+        try { if (typeof window.verDesglose === 'function') window.verDesglose = function () {}; } catch (e) {}
+        try {
+          var st = document.createElement('style');
+          st.textContent = 'button[onclick^="verDesglose"]{display:none!important}';
+          document.head.appendChild(st);
+        } catch (e) {}
         /* el margen en la pantalla de precios: sin costo no significa nada */
         try {
           if (window.DMFactura && typeof DMFactura.verMargen === 'function') {
@@ -17707,7 +17782,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 24/09/2026 11:27</div>
+                margin-top:10px;opacity:.75">Versión del 24/09/2026 15:00</div>
   </div>
 </div>
 
