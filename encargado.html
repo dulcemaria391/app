@@ -11313,46 +11313,39 @@ var DMFactura = (function () {
     return l.join('\n');
   }
 
-  /* ── Compartir ───────────────────────────────────────────────────────── */
-  function compartir(f) {
-    if (!f) return;
-    var canvas;
-    try { canvas = dibujarRecibo(f); }
-    catch (e) { avisar('No se pudo dibujar el recibo: ' + e.message, 'err'); return; }
+  /* ── Compartir ───────────────────────────────────────────────────────────
+     [25 sep 2026] WhatsApp no deja que una página web abra el chat de un
+     contacto Y le adjunte una foto a la vez: el enlace wa.me solo lleva texto,
+     y el menú «Compartir» del celular manda la foto pero obliga a escoger el
+     contacto a mano (y a veces fallaba y caía en un chat con solo una línea).
+     Ahora es siempre igual: la foto queda COPIADA y se abre el chat del
+     cliente con su número ya puesto y sin texto; ahí se mantiene presionado y
+     se toca «Pegar». Si el celular no deja copiar, la foto se descarga y se
+     adjunta con el clip 📎. */
+  var PREPARADA = null;   /* { id, blob } lista desde la vista previa */
 
-    var nombre = 'remision_' + String(f.numero_factura || 'sn').replace(/[^\w-]/g, '') + '.png';
-    var tel = telWhatsApp(f.cliente && f.cliente.telefono);
-
-    canvas.toBlob(function (blob) {
-      if (!blob) { avisar('No se pudo generar la imagen', 'err'); return; }
-      var archivo = null;
-      try { archivo = new File([blob], nombre, { type: 'image/png' }); } catch (e) {}
-
-      /* Camino bueno: compartir la imagen con el menu nativo del telefono,
-         que incluye WhatsApp. */
-      /* Solo la imagen, SIN texto. Antes iba tambien textoRecibo(f) y WhatsApp
-         lo pegaba como pie de la foto: quedaba la remision escrita dos veces,
-         una en la imagen y otra debajo. Tony pidio que no se repita. */
-      if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] }) && navigator.share) {
-        navigator.share({
-          files: [archivo],
-          title: 'Remisión ' + (f.numero_factura || '')
-        }).then(function () {
-          avisar('Recibo compartido', 'ok');
-        }).catch(function (err) {
-          if (err && err.name === 'AbortError') return;   /* el usuario cerró el menú */
-          respaldo(blob, nombre, f, tel);
-        });
-        return;
-      }
-      /* En computador o navegador sin compartir de archivos */
-      respaldo(blob, nombre, f, tel);
-    }, 'image/png');
+  function nombreImagen(f) {
+    return 'remision_' + String(f.numero_factura || 'sn').replace(/[^\w-]/g, '') + '.png';
   }
 
-  /* Descarga la imagen y abre el chat de WhatsApp con el detalle en texto,
-     para que solo haya que adjuntar la foto recien bajada. */
-  function respaldo(blob, nombre, f, tel) {
+  /* Teléfono del cliente: el de la factura y, si no quedó guardado ahí, el
+     del directorio de clientes (por id o por nombre). */
+  function telDeCliente(f) {
+    var cli = (f && f.cliente) || {};
+    var t = telWhatsApp(cli.telefono);
+    if (t) return { tel: t, visible: cli.telefono };
+    var nom = String(cli.nombre || '').trim().toUpperCase();
+    for (var i = 0; i < CAT_CLIENTES.length; i++) {
+      var c = CAT_CLIENTES[i];
+      if (!c || !c.telefono) continue;
+      if ((cli.id && c.id === cli.id) || (nom && String(c.nombre || '').trim().toUpperCase() === nom)) {
+        return { tel: telWhatsApp(c.telefono), visible: c.telefono };
+      }
+    }
+    return { tel: '', visible: '' };
+  }
+
+  function bajarImagen(blob, nombre) {
     try {
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
@@ -11360,14 +11353,63 @@ var DMFactura = (function () {
       document.body.appendChild(a); a.click();
       setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} URL.revokeObjectURL(url); }, 3000);
     } catch (e) {}
-    /* Este es el camino de respaldo: el navegador no pudo compartir la imagen,
-       así que se descarga y se abre el chat para adjuntarla a mano. Aquí NO va
-       la remisión escrita —eso es lo que Tony no quiere ver repetido—, solo una
-       línea que diga de qué se trata, porque si no el chat abre en blanco. */
-    var linea = 'Remisión N° ' + (f.numero_factura || '—') + ' · ' + negocio().nombre;
-    var enlace = 'https://wa.me/' + (tel || '') + '?text=' + encodeURIComponent(linea);
-    window.open(enlace, '_blank');
-    avisar('Se descargó la imagen del recibo. Adjúntala en el chat que se abrió.', 'info');
+  }
+
+  function compartir(f) {
+    if (!f) return;
+    var nombre = nombreImagen(f);
+    var t = telDeCliente(f);
+    var chat = 'https://wa.me/' + (t.tel || '');          /* sin texto: solo la foto */
+
+    /* la imagen: la ya preparada en la vista previa (así se copia dentro del
+       mismo toque) o se dibuja ahora */
+    var blobListo = (PREPARADA && PREPARADA.id === f.id) ? PREPARADA.blob : null;
+    var blobP;
+    if (blobListo) blobP = Promise.resolve(blobListo);
+    else {
+      var canvas;
+      try { canvas = dibujarRecibo(f); }
+      catch (e) { avisar('No se pudo dibujar el recibo: ' + e.message, 'err'); return; }
+      blobP = new Promise(function (res) { canvas.toBlob(res, 'image/png'); });
+    }
+
+    var copiado = null;
+    try {
+      if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+        copiado = navigator.clipboard.write([new ClipboardItem({ 'image/png': blobListo || blobP })]);
+      }
+    } catch (e) { copiado = null; }
+    if (!copiado) copiado = Promise.reject(new Error('sin portapapeles'));
+
+    copiado.then(function () {
+      try { window.open(chat, '_blank'); } catch (e) {}
+      pasoPegar(f, t, chat, true);
+    }, function () {
+      blobP.then(function (blob) { if (blob) bajarImagen(blob, nombre); });
+      try { window.open(chat, '_blank'); } catch (e) {}
+      pasoPegar(f, t, chat, false);
+    });
+  }
+
+  /* Ventana que queda en la app mientras se está en WhatsApp: dice qué hacer
+     y deja el botón para volver a abrir el chat si el celular no lo abrió. */
+  function pasoPegar(f, t, chat, copiada) {
+    if (typeof abrirModal !== 'function') return;
+    var quien = esc2((f.cliente && f.cliente.nombre) || 'el cliente');
+    var como = copiada
+      ? '📋 La foto de la remisión quedó <strong>copiada</strong>. En el chat, <strong>mantén presionado</strong> donde se escribe y toca <strong>«Pegar»</strong>; luego envía.'
+      : '⬇️ La foto de la remisión se <strong>descargó</strong>. En el chat toca el clip 📎 → Galería y escógela.';
+    var dest = t.tel
+      ? 'Chat de <strong>' + quien + '</strong> · ' + esc2(t.visible)
+      : '<span style="color:var(--rojo)">Este cliente no tiene teléfono guardado: escoge el contacto a mano.</span>';
+    abrirModal(
+      '<h3>📲 Enviar remisión N° ' + esc2(f.numero_factura || '—') + '</h3>' +
+      '<p style="font-size:.82rem;margin-bottom:8px">' + dest + '</p>' +
+      '<p style="font-size:.86rem;margin-bottom:14px">' + como + '</p>' +
+      '<div class="btn-row">' +
+      '<a class="btn btn-success btn-sm" href="' + chat + '" target="_blank" rel="noopener">💬 Abrir chat</a>' +
+      '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Listo</button>' +
+      '</div>');
   }
 
   /* Vista previa antes de enviar */
@@ -11377,10 +11419,12 @@ var DMFactura = (function () {
     var canvas;
     try { canvas = dibujarRecibo(f); }
     catch (e) { avisar('No se pudo dibujar el recibo: ' + e.message, 'err'); return; }
+    PREPARADA = null;
+    try { canvas.toBlob(function (b) { if (b) PREPARADA = { id: f.id, blob: b }; }, 'image/png'); } catch (e) {}
     var img = canvas.toDataURL('image/png');
-    var tel = telWhatsApp(f.cliente && f.cliente.telefono);
-    var aviso = tel
-      ? '<p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Se enviará a <strong>' + esc2(f.cliente.telefono) + '</strong>.</p>'
+    var t = telDeCliente(f);
+    var aviso = t.tel
+      ? '<p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Se abrirá el chat de <strong>' + esc2(t.visible) + '</strong> con la foto lista para pegar.</p>'
       : '<p style="font-size:.8rem;color:var(--rojo);margin-bottom:10px">Este cliente no tiene teléfono guardado: WhatsApp abrirá sin destinatario y tendrás que escogerlo a mano.</p>';
     if (typeof abrirModal === 'function') {
       abrirModal(
@@ -11405,12 +11449,7 @@ var DMFactura = (function () {
     if (!f) return;
     var canvas = dibujarRecibo(f);
     canvas.toBlob(function (blob) {
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'remision_' + String(f.numero_factura || 'sn').replace(/[^\w-]/g, '') + '.png';
-      document.body.appendChild(a); a.click();
-      setTimeout(function () { try { document.body.removeChild(a); } catch (e) {} URL.revokeObjectURL(url); }, 3000);
+      bajarImagen(blob, nombreImagen(f));
       avisar('Recibo descargado', 'ok');
     }, 'image/png');
   }
@@ -11549,6 +11588,7 @@ var DMFactura = (function () {
     dibujarRecibo: dibujarRecibo,
     textoRecibo: textoRecibo,
     telWhatsApp: telWhatsApp,
+    telDeCliente: telDeCliente,
     negocio: negocio, guardarNegocio: guardarNegocio, pintarNegocio: pintarNegocio,
     NEGOCIO_DEF: NEGOCIO_DEF
   };
@@ -17785,7 +17825,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 24/09/2026 15:01</div>
+                margin-top:10px;opacity:.75">Versión del 25/09/2026 08:25</div>
   </div>
 </div>
 
