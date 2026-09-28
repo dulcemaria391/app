@@ -3672,6 +3672,9 @@ async function actualizarTurno(){
     totC3:parseInt((document.getElementById('tC3')||{}).textContent)||0,
     foto:viejo.foto||null,metodo:viejo.metodo||'manual'
   };
+  /* [28 sep 2026] sin insumos no se corrige: se revisa ANTES de deshacer el viejo */
+  try{ if(window.DMCostos&&DMCostos.faltantesObleas){ var _f=DMCostos.faltantesObleas(nuevo,viejo);
+    if(_f.length){ showAlrt('manual',DMCostos.mensajeFaltantes(_f),'err'); return; } } }catch(e){}
   try{
     if(window.DMDeshacer&&typeof DMDeshacer.turnoObleas==='function'){
       await DMDeshacer.turnoObleas(viejo);
@@ -5550,6 +5553,15 @@ function calcCostos(){
 function guardarRegistro(){
   var fecha=ar_gId('r-fecha').value;
   if(!fecha){ ar_showAlert('al-reg','⚠ Ingresa la fecha','err'); return; }
+  /* [28 sep 2026] Sin insumos no se registra el lote: se revisa ANTES de
+     deshacer nada (si se está corrigiendo, lo que usó el lote viejo cuenta
+     como disponible porque se devuelve). */
+  var _faltan=arFaltantes(_editandoRegId);
+  if(_faltan.length){
+    ar_showAlert('al-reg','⛔ No se puede guardar el lote: faltan insumos. '+_faltan.join(' · ')+'. Registra primero la compra en Inventario → Insumos.','err');
+    try{ var _al=ar_gId('al-reg'); if(_al&&_al.scrollIntoView)_al.scrollIntoView({block:'center'}); }catch(e){}
+    return;
+  }
   /* [CORREGIR 24 sep 2026] Si se está corrigiendo un lote (botón ✏️), primero
      se deshace el registro viejo —devuelve insumos/empaques y saca del stock lo
      que produjo, igual que al eliminar— y luego se guarda el corregido como
@@ -6465,6 +6477,27 @@ function inv_registrarCompra(){
   ar_gId('ar-inv-cant').value=''; ar_gId('ar-inv-prov').value=''; ar_gId('inv-preview').style.display='none';
   inv_render(); inv_renderHistorial(); inv_renderAlertas();
 }
+/* Insumos y empaques que no alcanzan para el lote del formulario. Si el
+   inventario de insumos nunca se cargó, no bloquea. */
+function arFaltantes(idViejo){
+  var stock=inv_getStock(); if(!Object.keys(stock).length) return [];
+  var viejo=null; if(idViejo!==null&&idViejo!==undefined) getRegistros().forEach(function(r){ if(r.id===idViejo) viejo=r; });
+  var faltan=[];
+  function hay(id){ return Number((stock[id]||{}).cantActual)||0; }
+  INSUMOS_DEF.forEach(function(ins){
+    var el=document.getElementById('ins-'+ins.id); var q=el?(parseFloat(el.value)||0):0; if(q<=0) return;
+    var h=hay(ins.id)+((viejo&&viejo.insumos)?(Number(viejo.insumos[ins.id])||0):0);
+    if(q>h+1e-6) faltan.push(ins.nombre+' (necesita '+fmtN(q)+' '+ins.unidad+', hay '+fmtN(Math.max(0,h))+')');
+  });
+  var prod={tetero:parseInt(ar_gId('r-tetero').value)||0,bolsa:parseInt(ar_gId('r-bolsa').value)||0,tarrina:parseInt(ar_gId('r-tarrina').value)||0};
+  var pv=(viejo&&viejo.produccion)||{};
+  EMPAQUES_DEF.forEach(function(e){
+    var q=prod[e.campo]||0; if(q<=0) return;
+    var h=hay(e.id)+(Number(pv[e.campo])||0);
+    if(q>h) faltan.push(e.nombre+' (necesita '+fmtN(q)+', hay '+fmtN(Math.max(0,h))+')');
+  });
+  return faltan;
+}
 function inv_descontarConsumo(reg){
   var stock=inv_getStock(); var mov=inv_getMov(); var alertas=[]; var ts=Date.now();
   INSUMOS_DEF.forEach(function(ins){
@@ -7163,21 +7196,29 @@ function persistirFacturaTransaccional(factura){
 }
 
 /* Revertir efectos de una factura al eliminarla (transaccional) */
-function revertirFacturaTransaccional(factura){
+function revertirFacturaTransaccional(factura,esEdicion){
   return new Promise(function(res,rej){
     var stores=[STORE_FACTURAS,STORE_INVENTARIO,STORE_CLIENTES,STORE_MOVS,STORE_FINANZAS];
     var t; try{ t=DB.transaction(stores,'readwrite'); }catch(e){ return rej(e); }
     var sF=t.objectStore(STORE_FACTURAS), sI=t.objectStore(STORE_INVENTARIO),
         sC=t.objectStore(STORE_CLIENTES), sM=t.objectStore(STORE_MOVS), sFi=t.objectStore(STORE_FINANZAS);
     var err=null;
-    t.oncomplete=function(){ err?rej(err):res(true); };
+    /* [28 sep 2026] lápidas: lo que se borra aquí también se borra en el otro
+       celular al unir (antes quedaba vivo allá: cuentas por cobrar repetidas). */
+    var finBorrados=[];
+    t.oncomplete=function(){
+      if(!err&&typeof DMSync!=='undefined'&&DMSync.marcarBorradoIDB){
+        finBorrados.forEach(function(id){ DMSync.marcarBorradoIDB('facturaai_finanzas',id); });
+        if(!esEdicion)DMSync.marcarBorradoIDB('facturaai_facturas',factura.id);
+      }
+      err?rej(err):res(true); };
     t.onerror=function(e){ rej(err||e.target.error); };
     t.onabort=function(){ rej(err||new Error('Reversión cancelada')); };
     try{
       sF.delete(factura.id);
       /* borrar movimientos financieros de esta factura */
       var idxFi=sFi.index('facturaId').openCursor(IDBKeyRange.only(factura.id));
-      idxFi.onsuccess=function(e){ var cur=e.target.result; if(cur){ cur.delete(); cur.continue(); } };
+      idxFi.onsuccess=function(e){ var cur=e.target.result; if(cur){ finBorrados.push(cur.value&&cur.value.id); cur.delete(); cur.continue(); } };
       /* devolver stock */
       (factura.productos||[]).forEach(function(p){
         var k=prodKey(p); if(!k)return; var cant=Number(p.cantidad)||0;
@@ -7608,6 +7649,38 @@ function guardarFactura(){
   var f=recolectarFactura();
   if(!f.productos.length){ vt_showAlert('al-form','⚠ Agrega al menos un producto','err'); return; }
   if(!f.cliente.nombre){ vt_showAlert('al-form','⚠ Falta el nombre del cliente','err'); return; }
+  /* [28 sep 2026] No se vende lo que no hay en inventario. */
+  validarStockVenta(f).then(function(faltan){
+    if(faltan.length){
+      abrirModal('<h3>⛔ No hay inventario suficiente</h3>'+
+        '<p style="font-size:.86rem;margin-bottom:10px">No se puede guardar la venta. Falta:</p>'+
+        faltan.map(function(x){ return '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📦 '+esc(x.nombre)+'</span><span>pides <strong>'+x.pide+'</strong> · hay <strong>'+x.hay+'</strong></span></div>'; }).join('')+
+        '<p style="font-size:.78rem;color:var(--gris);margin-top:10px">Registra primero la producción o la entrada de stock, o baja la cantidad.</p>'+
+        '<div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Entendido</button></div>');
+      vt_showAlert('al-form','⛔ No hay inventario suficiente de: '+faltan.map(function(x){return x.nombre;}).join(', '),'err');
+      return;
+    }
+    guardarFacturaSigue(f);
+  });
+}
+/* Qué productos de la venta no alcanzan. En edición, lo que tenía la versión
+   anterior de la factura vuelve al stock antes de descontar la nueva. */
+function validarStockVenta(f){
+  var anterior=FACTURA_EDIT?(CACHE_FACTURAS.find(function(x){return x.id===FACTURA_EDIT;})||null):null;
+  return dbGetAll(STORE_INVENTARIO).then(function(inv){
+    var porKey={}; inv.forEach(function(i){ porKey[i.key]=i; });
+    var pide={}, nom={}, devuelve={};
+    (f.productos||[]).forEach(function(p){ var k=prodKey(p); if(!k)return; pide[k]=(pide[k]||0)+(Number(p.cantidad)||0); nom[k]=p.nombre||k; });
+    if(anterior)(anterior.productos||[]).forEach(function(p){ var k=prodKey(p); if(!k)return; devuelve[k]=(devuelve[k]||0)+(Number(p.cantidad)||0); });
+    var faltan=[];
+    Object.keys(pide).forEach(function(k){
+      var it=porKey[k]; var hay=(it?(Number(it.stock)||0):0)+(devuelve[k]||0);
+      if(pide[k]>hay) faltan.push({nombre:(it&&it.nombre)||nom[k],pide:pide[k],hay:Math.max(0,hay)});
+    });
+    return faltan;
+  }).catch(function(){ return []; });
+}
+function guardarFacturaSigue(f){
   /* En edición no chequeamos duplicado contra sí misma */
   if(FACTURA_EDIT){ ejecutarEdicion(f); return; }
   buscarDuplicado(f.numero_factura).then(function(dup){
@@ -7636,7 +7709,8 @@ function ejecutarGuardado(f){
 function ejecutarEdicion(f){
   var anterior=CACHE_FACTURAS.find(function(x){return x.id===f.id;});
   if(!anterior){ ejecutarGuardado(f); return; }
-  revertirFacturaTransaccional(anterior).then(function(){
+  f.editada=Date.now(); /* para que el otro celular reemplace su copia (sync.js) */
+  revertirFacturaTransaccional(anterior,true).then(function(){
     return persistirFacturaTransaccional(f);
   }).then(function(){
     toast('Factura actualizada · inventario ajustado','ok');
@@ -8124,10 +8198,54 @@ function abrirEntradaStock(keyPre){
         '<div><label>Precio de venta (c/u)</label><input type="number" id="es-venta" placeholder="0" value="'+((arr.find(function(x){return x.key===keyPre;})||{}).precioVenta||'')+'"></div>'+
       '</div>'+
       '<div style="margin-top:10px"><label>Nota / referencia</label><input type="text" id="es-nota" placeholder="Ej: Compra a proveedor"></div>'+
+      /* [28 sep 2026] Compra de mercancía para revender (grageas…): la plata
+         sale de caja o bancos, o queda como cuenta por pagar y sale el día
+         que se paga en Cuentas por pagar. */
+      '<div class="sec-label" style="margin-top:12px">💸 ¿Cómo la pagaste?</div>'+
+      '<select id="es-forma" onchange="onCambioFormaEntrada()">'+
+        '<option value="nada">Solo el inventario · la plata no se mueve</option>'+
+        '<option value="caja">Contado · efectivo de caja</option>'+
+        '<option value="banco">Contado · transferencia o consignación</option>'+
+        '<option value="credito">Crédito · queda por pagar</option>'+
+        '<option value="abono">Abono ahora y el resto a crédito</option></select>'+
+      '<div id="es-wrap-prov" style="display:none;margin-top:8px"><label>Proveedor</label><input type="text" id="es-prov" placeholder="Ej: Distribuidora"></div>'+
+      '<div id="es-wrap-abono" style="display:none;margin-top:8px"><div class="fg c2">'+
+        '<div><label>Abonaste</label><input type="number" id="es-abono" placeholder="0"></div>'+
+        '<div><label>Sale de</label><select id="es-abono-medio" onchange="onCambioFormaEntrada()"><option value="caja">Caja</option><option value="banco">Banco</option></select></div></div></div>'+
+      '<div id="es-wrap-banco" style="display:none;margin-top:8px"><label>Banco</label>'+selectorBancoHTML('es')+'</div>'+
+      '<div id="es-wrap-vence" style="display:none;margin-top:8px"><label>Vence el</label><input type="date" id="es-vence"></div>'+
+      '<div id="es-total-compra" style="margin-top:8px;font-size:.8rem;color:var(--gris)"></div>'+
       '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="confirmarEntrada()">Ingresar</button>'+
       '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>';
     abrirModal(html);
+    var sel=vt_gId('es-prod'); if(sel)sel.addEventListener('change',formaSegunProducto);
+    var nv=vt_gId('es-nuevo'); if(nv)nv.addEventListener('change',formaSegunProducto);
+    ['es-cant','es-costo','es-abono'].forEach(function(id){ var e=vt_gId(id); if(e)e.addEventListener('input',onCambioFormaEntrada); });
+    formaSegunProducto();
   });
+}
+/* Mercancía que se compra para revender (catálogo origen 'compra', ej. grageas):
+   por defecto la plata sale de caja. Lo que se produce: solo inventario. */
+function formaSegunProducto(){
+  var sel=vt_gId('es-prod'), f=vt_gId('es-forma'); if(!sel||!f)return;
+  var nom=sel.value?(sel.options[sel.selectedIndex].text||''):(vt_gId('es-nuevo').value||'');
+  var c=(typeof DMCatalogo!=='undefined'&&DMCatalogo.buscar)?DMCatalogo.buscar(nom):null;
+  f.value=(c&&c.origen==='compra')?'caja':'nada';
+  onCambioFormaEntrada();
+}
+function onCambioFormaEntrada(){
+  var f=(vt_gId('es-forma')||{}).value||'nada';
+  var abBanco=((vt_gId('es-abono-medio')||{}).value==='banco');
+  function ver(id,si){ var e=vt_gId(id); if(e)e.style.display=si?'block':'none'; }
+  ver('es-wrap-prov',f!=='nada'); ver('es-wrap-abono',f==='abono');
+  ver('es-wrap-banco',f==='banco'||(f==='abono'&&abBanco)); ver('es-wrap-vence',f==='credito'||f==='abono');
+  var v=vt_gId('es-vence'); if(v&&!v.value&&(f==='credito'||f==='abono')){ var d=new Date(); d.setDate(d.getDate()+30); v.value=d.toISOString().slice(0,10); }
+  var tot=(Number((vt_gId('es-cant')||{}).value)||0)*(Number((vt_gId('es-costo')||{}).value)||0);
+  var ab=Number((vt_gId('es-abono')||{}).value)||0;
+  var txt={nada:'',caja:'Sale de caja: <strong>'+fmtMoneda(tot)+'</strong>',banco:'Sale del banco: <strong>'+fmtMoneda(tot)+'</strong>',
+    credito:'Queda por pagar: <strong>'+fmtMoneda(tot)+'</strong>. Sale de caja o banco el día que la pagues en Cuentas por pagar.',
+    abono:'Sale ahora '+fmtMoneda(ab)+' y queda por pagar <strong>'+fmtMoneda(Math.max(0,tot-ab))+'</strong>'};
+  var e=vt_gId('es-total-compra'); if(e)e.innerHTML=txt[f]||'';
 }
 function confirmarEntrada(){
   var prodSel=vt_gId('es-prod').value;
@@ -8138,11 +8256,24 @@ function confirmarEntrada(){
   var nota=vt_gId('es-nota').value.trim()||'Entrada manual';
   if(cant<=0){ toast('Cantidad inválida','err'); return; }
   if(!prodSel&&!nuevo){ toast('Elige un producto o escribe uno nuevo','err'); return; }
+  /* pago de la compra */
+  var forma=(vt_gId('es-forma')||{}).value||'nada';
+  var totalCompra=Math.round(cant*costo*100)/100;
+  var prov=((vt_gId('es-prov')||{}).value||'').trim();
+  var abono=Number((vt_gId('es-abono')||{}).value)||0;
+  var abMedio=(vt_gId('es-abono-medio')||{}).value||'caja';
+  var vence=(vt_gId('es-vence')||{}).value||'';
+  if(forma!=='nada'){
+    if(!(totalCompra>0)){ toast('Escribe el precio de costo c/u para saber cuánto pagaste','err'); return; }
+    if((forma==='credito'||forma==='abono')&&!prov){ toast('Escribe el proveedor: queda debiéndole','err'); return; }
+    if(forma==='abono'&&(abono<=0||abono>=totalCompra)){ toast('El abono debe ser mayor que 0 y menor que el total','err'); return; }
+  }
+  var bancoCompra=(forma==='banco'||(forma==='abono'&&abMedio==='banco'))?leerBanco('es'):null;
   var key=prodSel||prodKey({nombre:nuevo});
   var nombre=nuevo||null;
-  /* transacción: inventario + movimiento */
-  var t=DB.transaction([STORE_INVENTARIO,STORE_MOVS],'readwrite');
-  var sI=t.objectStore(STORE_INVENTARIO), sM=t.objectStore(STORE_MOVS);
+  /* transacción: inventario + movimiento (+ la plata de la compra) */
+  var t=DB.transaction([STORE_INVENTARIO,STORE_MOVS,STORE_FINANZAS],'readwrite');
+  var sI=t.objectStore(STORE_INVENTARIO), sM=t.objectStore(STORE_MOVS), sFi=t.objectStore(STORE_FINANZAS);
   var g=sI.get(key);
   g.onsuccess=function(){
     var item=g.result||{key:key,nombre:nombre||key,codigo:null,stock:0,minimo:5,precioVenta:0,precioCosto:0,unidadesVendidas:0,ultimaSalida:null};
@@ -8158,9 +8289,24 @@ function confirmarEntrada(){
     item.stock=stockAnterior+cant;
     if(venta>0)item.precioVenta=venta;
     sI.put(item);
-    sM.put({id:uid(),prodKey:key,tipo:'entrada',cantidad:cant,fecha:hoyISO(),ref:nota+(costo>0?(' · costo prom. '+fmtMoneda(item.precioCosto)):''),ts:Date.now()});
+    sM.put({id:uid(),prodKey:key,tipo:'entrada',cantidad:cant,fecha:hoyISO(),ref:nota+(costo>0?(' · costo prom. '+fmtMoneda(item.precioCosto)):''),costo:(costo>0?costo:0),ts:Date.now()});
+    /* Compra de mercancía: costo de lo vendido (clase 'produccion'), no resta
+       utilidad otra vez — la venta ya descuenta su costo c/u. */
+    if(forma!=='nada'){
+      var nomP=item.nombre||key;
+      var base={clase:'produccion',categoria:'Mercancía',rubro:'Compra de mercancía',producto:nomP,fecha:hoyISO(),facturaId:null,cliente:null};
+      function salida(medio,monto){ var esB=(medio==='banco');
+        sFi.put(Object.assign({},base,{id:uid(),cuenta:esB?'bancos':'caja',tipo:'egreso',monto:monto,banco:esB?(bancoCompra||'Sin especificar'):null,
+          ref:'Compra de '+nomP+(prov?' · '+prov:''),ts:Date.now()})); }
+      function deuda(monto){
+        sFi.put(Object.assign({},base,{id:uid(),cuenta:'pagar',tipo:'pendiente',monto:monto,vence:vence,proveedor:prov,banco:null,
+          ref:'Compra de '+nomP+' ('+cant+' und)',ts:Date.now()})); }
+      if(forma==='caja'||forma==='banco')salida(forma,totalCompra);
+      else if(forma==='credito')deuda(totalCompra);
+      else if(forma==='abono'){ salida(abMedio,abono); deuda(Math.round((totalCompra-abono)*100)/100); }
+    }
   };
-  t.oncomplete=function(){ toast('Stock ingresado','ok'); cerrarModal(); refrescarTodo(); };
+  t.oncomplete=function(){ toast(forma==='nada'?'Stock ingresado':(forma==='credito'?'Compra ingresada · quedó en Cuentas por pagar':'Compra ingresada · salida de plata registrada'),'ok'); cerrarModal(); refrescarTodo(); };
   t.onerror=function(){ toast('Error al ingresar stock','err'); };
 }
 function exportarInventarioCSV(){
@@ -8552,6 +8698,15 @@ function renderFinanzas(){
       huerfanos.forEach(function(m){ st.delete(m.id); });
       movs=movs.filter(function(m){ return !(m.facturaId && !idsFacturas[m.facturaId]); });
     }
+    /* [28 sep 2026] cuentas repetidas o ya pagadas (ver DMSync.pendientesSobrantes) */
+    if(typeof DMSync!=='undefined'&&DMSync.pendientesSobrantes){
+      var sobran=DMSync.pendientesSobrantes(movs,facturas);
+      if(sobran.length){
+        var txS=DB.transaction([STORE_FINANZAS],'readwrite'); var stS=txS.objectStore(STORE_FINANZAS);
+        var mS={}; sobran.forEach(function(id){ mS[id]=1; stS.delete(id); });
+        movs=movs.filter(function(m){ return !mS[m.id]; });
+      }
+    }
     /* saldo inicial heredado del último cierre (o cero si aún no hay cierres) */
     var si = ultimoCierre ? ultimoCierre.saldo_final : null;
     var siCaja = si ? (Number(si.caja)||0) : 0;
@@ -8613,18 +8768,29 @@ function renderFinanzas(){
           '<button class="btn btn-success btn-sm" style="padding:3px 8px" onclick="abrirCobro(\''+m.id+'\')">Pagada</button></span></div>'; }).join('');
     }).join(''):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">No hay cuentas por cobrar. 🎉</p>';
 
-    /* Cuentas por pagar (ordenadas por vencimiento) */
+    /* Cuentas por pagar: primero el TOTAL que se debe y luego el detalle por
+       proveedor (igual que Cuentas por cobrar). [28 sep 2026] */
     pagarPend.sort(function(a,b){ return (a.vence||'9999').localeCompare(b.vence||'9999'); });
     var hoyStr=hoyISO();
-    vt_gId('lista-pagar').innerHTML=pagarPend.length?(pagarPend.map(function(m){
-      var vencida=m.vence&&m.vence<hoyStr;
-      var prontoVence=m.vence&&!vencida&&((new Date(m.vence)-new Date(hoyStr))/(1000*60*60*24))<=3;
-      var alerta=vencida?'<span class="badge" style="background:#fde0dc;color:#7a1010">vencida</span>':(prontoVence?'<span class="badge" style="background:#fff3cd;color:#856404">vence pronto</span>':'');
-      return '<div class="mini-row" style="padding:8px 0;border-bottom:1px solid var(--crema2)">'+
-        '<span>💸 <strong>'+esc(m.proveedor||'')+'</strong> '+alerta+'<br><span style="font-size:.74rem;color:var(--gris)">'+esc(m.ref||'')+(m.vence?' · vence '+fmtFecha(m.vence):'')+'</span></span>'+
-        '<span style="display:flex;gap:6px;align-items:center"><strong>'+fmtMoneda(m.monto)+'</strong>'+
-        '<button class="btn btn-success btn-sm" style="padding:3px 8px" onclick="abrirPagoCuenta(\''+m.id+'\')">Pagar</button></span></div>';
-    }).join('')+'<div class="mini-row" style="padding:10px 0;font-weight:700;border-top:2px solid var(--crema2)"><span>Total por pagar</span><strong style="color:var(--rojo)">'+fmtMoneda(pagarTot)+'</strong></div>'):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">No debes nada. 🎉</p>';
+    var porProvP={};
+    pagarPend.forEach(function(m){ var p=m.proveedor||'Sin nombre'; (porProvP[p]=porProvP[p]||[]).push(m); });
+    var totProv=function(p){ return porProvP[p].reduce(function(s,m){return s+(Number(m.monto)||0);},0); };
+    var nombresPP=Object.keys(porProvP).sort(function(a,b){ return totProv(b)-totProv(a); });
+    vt_gId('lista-pagar').innerHTML=pagarPend.length?(
+      '<div class="mini-row" style="padding:10px 0;font-weight:700;border-bottom:2px solid var(--crema2)"><span>Total por pagar</span><strong style="color:var(--rojo)">'+fmtMoneda(pagarTot)+'</strong></div>'+
+      nombresPP.map(function(prov){
+        var arr=porProvP[prov];
+        return '<div class="sec-label" style="margin-top:14px">🏪 '+esc(prov)+' · se le debe '+fmtMoneda(totProv(prov))+'</div>'+
+          arr.map(function(m){
+            var vencida=m.vence&&m.vence<hoyStr;
+            var prontoVence=m.vence&&!vencida&&((new Date(m.vence)-new Date(hoyStr))/(1000*60*60*24))<=3;
+            var alerta=vencida?' <span class="badge" style="background:#fde0dc;color:#7a1010">vencida</span>':(prontoVence?' <span class="badge" style="background:#fff3cd;color:#856404">vence pronto</span>':'');
+            return '<div class="mini-row" style="padding:7px 0;border-bottom:1px solid var(--crema2)">'+
+              '<span>'+fmtFecha(m.fecha)+' · '+esc(m.ref||'')+alerta+(m.vence?'<br><span style="font-size:.74rem;color:var(--gris)">vence '+fmtFecha(m.vence)+'</span>':'')+'</span>'+
+              '<span style="display:flex;gap:6px;align-items:center"><strong>'+fmtMoneda(m.monto)+'</strong>'+
+              '<button class="btn btn-success btn-sm" style="padding:3px 8px" onclick="abrirPagoCuenta(\''+m.id+'\')">Pagar</button></span></div>';
+          }).join('');
+      }).join('')):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">No debes nada. 🎉</p>';
 
     /* Bancos: por banco (clic para ver el detalle de movimientos) */
     var nombresB=Object.keys(porBanco).sort();
@@ -8731,9 +8897,14 @@ function exportMovimientosBanco(banco){
 
 /* [RESUMEN] estado general: caja, bancos, cuentas por cobrar, inventario por producto */
 function renderResumen(){
-  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),calcularPeriodo(null,hoyISO())]).then(function(r){
-    var movs=r[0],facturas=r[1],inv=r[2],utilHist=r[3];
+  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),calcularPeriodo(null,hoyISO()),
+      calcularPeriodo(hoyISO().slice(0,8)+'01',hoyISO())]).then(function(r){
+    var movs=r[0],facturas=r[1],inv=r[2],utilHist=r[3],utilMes=r[4];
     var idsF={}; facturas.forEach(function(f){ idsF[f.id]=true; });
+    if(typeof DMSync!=='undefined'&&DMSync.pendientesSobrantes){
+      var mSob={}; DMSync.pendientesSobrantes(movs,facturas).forEach(function(id){ mSob[id]=1; });
+      movs=movs.filter(function(m){ return !mSob[m.id]; });
+    }
     var caja=0, porBanco={}, cobrarTot=0, cobrarPend=[], pagarTot=0, pagarPend=[];
     movs.forEach(function(m){
       if(m.facturaId&&!idsF[m.facturaId])return;
@@ -8808,7 +8979,17 @@ function renderResumen(){
     var prestamosEmpTot=(typeof DMPrestamos!=='undefined'&&DMPrestamos&&typeof DMPrestamos.saldos==='function')
       ? DMPrestamos.saldos().reduce(function(s,e){return s+(Number(e.saldo)||0);},0) : 0;
     var activoTot=caja+bancosTot+cobrarTot+prestamosEmpTot+valorInv;
-    var pasivoTot=pagarTot;
+    /* [28 sep 2026] Pasivo con los empleados:
+       - Nómina por pagar = jornal (sin bono) de los turnos/lotes trabajados
+         desde el último pago (DMNomina.calcular, Obleas + Arequipe).
+       - Bonos por pagar = bonos ya acumulados (obleas_bonos + ar_bonos, se
+         pagan en diciembre) + el bono de los turnos aún no liquidados. */
+    var nominaPend=0, bonosPend=0;
+    try{ if(typeof DMNomina!=='undefined'&&DMNomina&&typeof DMNomina.calcular==='function'){
+      ['obleas','arequipe'].forEach(function(l){ var c=DMNomina.calcular(l)||{}; nominaPend+=(Number(c.neto)||0); bonosPend+=(Number(c.bono)||0); }); } }catch(e){}
+    function sumaBonos(k){ try{ var o=JSON.parse(localStorage.getItem(k)||'{}')||{}; return Object.keys(o).reduce(function(s,x){return s+(Number(o[x])||0);},0); }catch(e){ return 0; } }
+    bonosPend+=sumaBonos('obleas_bonos')+sumaBonos('ar_bonos');
+    var pasivoTot=pagarTot+nominaPend+bonosPend;
     var patrimonioCalc=capitalNeto+(utilHist.utilidadNeta||0);
     var patrimonioPorDiferencia=activoTot-pasivoTot;
     var diferencia=patrimonioPorDiferencia-patrimonioCalc;
@@ -8817,13 +8998,15 @@ function renderResumen(){
       utilidadAcumulada:utilHist.utilidadNeta,patrimonioCalc:patrimonioCalc,
       patrimonioPorDiferencia:patrimonioPorDiferencia,diferencia:diferencia,
       caja:caja,bancosTot:bancosTot,cobrarTot:cobrarTot,prestamosEmpTot:prestamosEmpTot,
-      valorInv:valorInv,pagarTot:pagarTot};
+      valorInv:valorInv,pagarTot:pagarTot,nominaPend:nominaPend,bonosPend:bonosPend,utilidadMes:(utilMes&&utilMes.utilidadNeta)||0};
     var elKB=vt_gId('kpi-balance');
     if(elKB){
       elKB.innerHTML=
         kpi(fmtMoneda(activoTot),'📈 Activo total','verde')+
         kpi(fmtMoneda(pasivoTot),'📉 Pasivo total','')+
-        kpi(fmtMoneda(patrimonioCalc),'⚖️ Patrimonio','destacado');
+        kpi(fmtMoneda(patrimonioCalc),'⚖️ Patrimonio','destacado')+
+        kpi(fmtMoneda(utilHist.utilidadNeta||0),'📊 Utilidad acumulada','verde')+
+        kpi(fmtMoneda((utilMes&&utilMes.utilidadNeta)||0),'📅 Utilidad del mes','miel');
     }
     var elBD=vt_gId('balance-detalle');
     if(elBD){
@@ -8835,10 +9018,13 @@ function renderResumen(){
         '<div class="mini-row" style="padding:6px 0"><span>👤 Préstamos a empleados pendientes</span><strong>'+fmtMoneda(prestamosEmpTot)+'</strong></div>'+
         '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📦 Valor del inventario</span><strong>'+fmtMoneda(valorInv)+'</strong></div>'+
         '<div class="sec-label" style="margin-top:14px">📉 Pasivo · '+fmtMoneda(pasivoTot)+'</div>'+
-        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>💸 Por pagar (proveedores y préstamos recibidos)</span><strong>'+fmtMoneda(pasivoTot)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>💸 Por pagar (proveedores y préstamos recibidos)</span><strong>'+fmtMoneda(pagarTot)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>👷 Nómina por pagar a empleados (turnos sin pagar)</span><strong>'+fmtMoneda(nominaPend)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>🎁 Bonos por pagar a empleados</span><strong>'+fmtMoneda(bonosPend)+'</strong></div>'+
         '<div class="sec-label" style="margin-top:14px">⚖️ Patrimonio · '+fmtMoneda(patrimonioCalc)+'</div>'+
         '<div class="mini-row" style="padding:6px 0"><span>💰 Capital aportado por el dueño (acumulado)</span><strong>'+fmtMoneda(capitalNeto)+'</strong></div>'+
-        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📊 Utilidad acumulada histórica</span><strong>'+fmtMoneda(utilHist.utilidadNeta||0)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0"><span>📊 Utilidad acumulada histórica</span><strong>'+fmtMoneda(utilHist.utilidadNeta||0)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0 6px 18px;border-bottom:1px solid var(--crema2);font-size:.84rem;color:var(--gris)"><span>↳ de esa, utilidad del mes (desde el 1°)</span><strong>'+fmtMoneda((utilMes&&utilMes.utilidadNeta)||0)+'</strong></div>'+
         '<div class="mini-row" style="padding:10px 0;font-weight:700;border-top:2px solid var(--crema2);margin-top:6px"><span>Activo − Pasivo (patrimonio por diferencia)</span><strong>'+fmtMoneda(patrimonioPorDiferencia)+'</strong></div>'+
         (cuadra
           ? '<p style="font-size:.8rem;color:var(--verde);margin-top:8px">✅ El balance cuadra: Activo = Pasivo + Patrimonio.</p>'
@@ -8854,10 +9040,11 @@ function exportBalance(){
     ['Caja','',b.caja],['Bancos','',b.bancosTot],['Por cobrar (clientes)','',b.cobrarTot],
     ['Préstamos a empleados pendientes','',b.prestamosEmpTot],['Valor del inventario','',b.valorInv],
     ['Total activo','',b.activoTot],[],
-    ['PASIVO','',''],['Por pagar (proveedores y préstamos recibidos)','',b.pasivoTot],
+    ['PASIVO','',''],['Por pagar (proveedores y préstamos recibidos)','',b.pagarTot],
+    ['Nómina por pagar a empleados','',b.nominaPend],['Bonos por pagar a empleados','',b.bonosPend],
     ['Total pasivo','',b.pasivoTot],[],
     ['PATRIMONIO','',''],['Capital aportado (acumulado)','',b.capitalNeto],
-    ['Utilidad acumulada histórica','',b.utilidadAcumulada],['Total patrimonio','',b.patrimonioCalc],[],
+    ['Utilidad acumulada histórica','',b.utilidadAcumulada],['  de esa, utilidad del mes','',b.utilidadMes],['Total patrimonio','',b.patrimonioCalc],[],
     ['Activo − Pasivo (patrimonio por diferencia)','',b.patrimonioPorDiferencia],
     ['Diferencia a revisar','',b.diferencia]];
   generarCSV('balance_general',filas);
@@ -12541,6 +12728,9 @@ var DMCostos = (function () {
           id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
           prodKey: clave, tipo: 'entrada', cantidad: e.cant,
           fecha: reg.fecha, ref: 'Producción obleas · turno ' + (reg.lote || reg.fecha),
+          /* [28 sep 2026] costo de esta entrada: con él se deshace el promedio
+             al borrar/corregir el turno y el otro celular lo promedia al unir */
+          costo: e.costo, origen: marca,
           ts: Date.now()
         }));
       });
@@ -12550,6 +12740,48 @@ var DMCostos = (function () {
         return { paquetes: paquetes, combos: combos, costo: c };
       });
     });
+  }
+
+  /* ¿Qué insumos no alcanzan para este turno? viejo = el turno que se está
+     corrigiendo (sus consumos se devuelven antes, así que cuentan como
+     disponibles). Si el inventario de insumos nunca se cargó, no bloquea. */
+  var NOMBRES_OB = { harina: ['Harina de trigo', 'kg'], lecitina: ['Lecitina', 'kg'], aditivos: ['Aditivos', 'kg'],
+    adhesivo_obl: ['Adhesivo obleas', 'und'], icopor: ['Icopor', 'und'], bolsa: ['Bolsa obleas', 'und'],
+    adhesivo_comb: ['Adhesivo combos', 'und'], bolsa_termo: ['Bolsa termo combos', 'und'] };
+  function faltantesObleas(reg, viejo) {
+    var inv = {};
+    try { inv = JSON.parse(localStorage.getItem('obleas_inventario') || '{}') || {}; } catch (e) {}
+    var faltan = [];
+    if (Object.keys(inv).length) {
+      var pide = consumos(reg), devuelve = viejo ? consumos(viejo) : {};
+      Object.keys(pide).forEach(function (k) {
+        var q = Number(pide[k]) || 0; if (q <= 0) return;
+        var hay = (Number(inv[k] && inv[k].stock) || 0) + (Number(devuelve[k]) || 0);
+        if (q > hay + 1e-6) {
+          var n = NOMBRES_OB[k] || [k, ''];
+          faltan.push({ nombre: n[0], unidad: n[1], necesita: q, hay: Math.max(0, hay) });
+        }
+      });
+    }
+    /* los combos se arman con tarrinas de arequipe (se revisa solo si ya se
+       cargó el inventario de insumos, igual que lo de arriba) */
+    var combos = (Number(reg.totC1) || 0) + (Number(reg.totC2) || 0) + (Number(reg.totC3) || 0);
+    if (combos > 0 && Object.keys(inv).length) {
+      var pt = 0;
+      try { pt = Number(par().tarcomb) || 1; } catch (e) { pt = 1; }
+      var combosV = viejo ? (Number(viejo.totC1) || 0) + (Number(viejo.totC2) || 0) + (Number(viejo.totC3) || 0) : 0;
+      var tar = 0;
+      try { tar = Number((JSON.parse(localStorage.getItem('dm_ar_prod') || '{}').tarrina || {}).cant) || 0; } catch (e) {}
+      var hayT = tar + combosV * pt, pideT = combos * pt;
+      if (pideT > hayT) faltan.push({ nombre: 'Tarrinas de arequipe (para combos)', unidad: 'und', necesita: pideT, hay: Math.max(0, hayT) });
+    }
+    return faltan;
+  }
+  function mensajeFaltantes(faltan) {
+    function f(v) { return (Math.round(v * 100) / 100).toLocaleString('es-CO'); }
+    return '⛔ No se puede guardar la producción: faltan insumos. ' + faltan.map(function (x) {
+      return x.nombre + ' (necesita ' + f(x.necesita) + ' ' + x.unidad + ', hay ' + f(x.hay) + ')';
+    }).join(' · ') + '. Registra primero la compra en Inventario → Insumos.';
   }
 
   function descontarTarrinas(cant, reg) {
@@ -12587,6 +12819,13 @@ var DMCostos = (function () {
     var descontarOriginal = window.descontarInventario;
     if (typeof descontarOriginal === 'function') {
       window.descontarInventario = function (reg) {
+        /* [28 sep 2026] Sin insumos no se registra la producción. Solo al
+           guardar un turno NUEVO (sin id): el botón «recalcular inventario»
+           vuelve a pasar turnos viejos y esos no se bloquean. */
+        if (reg && reg.id == null) {
+          var faltan = faltantesObleas(reg, null);
+          if (faltan.length) return { ok: false, msg: mensajeFaltantes(faltan) };
+        }
         /* EL PRODUCTO TERMINADO ENTRA SIEMPRE.
            Antes esta línea iba después del corte de abajo, así que si el
            inventario de INSUMOS estaba vacío —como en una app recién
@@ -12695,6 +12934,36 @@ var DMCostos = (function () {
     cont.parentNode.insertBefore(d, cont.nextSibling);
   }
 
+  /* [28 sep 2026] Punto de partida del costo de la oblea: $6.500 por paquete
+     (decidido por la dueña). De ahí en adelante se promedia (ponderado) con
+     cada producción. One-time: si hay que volver a fijarlo, subir la versión. */
+  var K_MIG_OBLEA = 'dm_mig_costo_oblea_6500_v1';
+  function fijarCostoInicialOblea(intentos) {
+    try { if (localStorage.getItem(K_MIG_OBLEA)) return; } catch (e) { return; }
+    /* el celular del encargado no guarda costos */
+    try { var pf = window.DM_PERFIL; if (pf && (pf.ocultar || []).indexOf('costos') >= 0) return; } catch (e) {}
+    if (typeof dbGetAll !== 'function' || typeof dbPut !== 'function' ||
+        typeof STORE_INVENTARIO === 'undefined' || typeof prodKey !== 'function') {
+      if ((intentos || 0) < 40) setTimeout(function () { fijarCostoInicialOblea((intentos || 0) + 1); }, 500);
+      return;
+    }
+    var clave = prodKey({ nombre: 'Oblea x 50 unidades' });
+    var lee;
+    try { lee = dbGetAll(STORE_INVENTARIO); } catch (e) { lee = Promise.reject(e); }
+    lee.then(function (inv) {
+      var it = inv.filter(function (x) { return x.key === clave; })[0] || {
+        key: clave, nombre: 'Oblea x 50 unidades', codigo: null, stock: 0, minimo: 5,
+        precioVenta: 0, precioCosto: 0, unidadesVendidas: 0, ultimaSalida: null };
+      it.precioCosto = 6500;
+      return dbPut(STORE_INVENTARIO, it);
+    }).then(function () {
+      try { localStorage.setItem(K_MIG_OBLEA, new Date().toISOString()); } catch (e) {}
+    }).catch(function () {
+      if ((intentos || 0) < 40) setTimeout(function () { fijarCostoInicialOblea((intentos || 0) + 1); }, 500);
+    });
+  }
+  setTimeout(function () { fijarCostoInicialOblea(0); }, 1500);
+
   function arrancar(intentos) {
     intentos = intentos || 0;
     if (instalar()) return;
@@ -12707,6 +12976,7 @@ var DMCostos = (function () {
   return {
     calcular: calcular, consumos: consumos, manoDeObra: manoDeObra,
     costoTarrina: costoTarrina, entrarAVentas: entrarAVentas,
+    faltantesObleas: faltantesObleas, mensajeFaltantes: mensajeFaltantes,
     /* marcaTurno la necesita DMDeshacer para quitar la marca de «ya entro»
        cuando se borra un turno; si no, el turno no podria volver a entrar. */
     marcaTurno: marcaTurno,
@@ -13434,7 +13704,8 @@ var DMArequipeVentas = (function () {
         dbPut(STORE_MOVS, {
           id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
           prodKey: clave, tipo: 'entrada', cantidad: e.cant, fecha: reg.fecha,
-          ref: 'Producción ' + producto + ' · lote ' + (reg.lote || reg.fecha), ts: Date.now()
+          ref: 'Producción ' + producto + ' · lote ' + (reg.lote || reg.fecha),
+          costo: e.costo, ts: Date.now()
         });
       });
     }).catch(function (e) { console.warn('empujarAVentas:', e); });
@@ -13578,6 +13849,129 @@ var DMSync = (function () {
     escribirLS('dm_borrados', arr);
   }
 
+  /* [28 sep 2026] Lápidas para registros de plata y remisiones (IndexedDB).
+     Sin esto, una remisión eliminada o editada, o la compra borrada, seguía
+     viva en el otro celular (y volvía a entrar aquí con el próximo envío).
+     Usan la misma lista dm_borrados, así que viajan igual que las otras. */
+  var PREF_IDB = { facturaai_finanzas: 'FI', facturaai_facturas: 'FA' };
+  function marcarBorradoIDB(store, id) {
+    var pre = PREF_IDB[store];
+    if (!pre || id == null) return;
+    var k = pre + id;
+    var arr = leerLS('dm_borrados');
+    if (arr.some(function (r) { return r && r.k === k; })) return;
+    arr.push({ k: k, clave: store, id: id, ts: new Date().toISOString(), aparato: aparato() });
+    escribirLS('dm_borrados', arr);
+  }
+
+  /* [28 sep 2026] Cuentas por cobrar/pagar que ya NO deberían estar vivas.
+     Arregla datos viejos (pagos de antes del 24 sep, sin saldaId) y los
+     repetidos que quedaban al editar una remisión en un celular:
+       1) otro registro dice que la saldó (saldaId) o la reemplazó por un
+          abono (origenId);
+       2) cobrar: la remisión ya no es a crédito;
+       3) cobrar: hay un «Pago crédito» de esa remisión hecho DESPUÉS;
+       4) pagar: pago viejo sin saldaId con la misma referencia y monto
+          (uno a uno, nunca un pago cierra dos deudas);
+       5) cobrar: una remisión solo puede tener UNA cuenta viva — si hay
+          varias, queda la más reciente.
+     Devuelve la lista de ids que sobran. No toca nada: solo calcula. */
+  function pendientesSobrantes(movs, facturas) {
+    movs = (movs || []).filter(function (r) { return r && r.id; });
+    var fact = {};
+    (facturas || []).forEach(function (f) { if (f && f.id) fact[f.id] = f; });
+    var fuera = {}, reemplazado = {}, saldado = {};
+    movs.forEach(function (r) {
+      if (r.origenId) reemplazado[r.origenId] = true;
+      if (r.saldaId) saldado[r.saldaId] = true;
+    });
+    var pend = movs.filter(function (r) {
+      return r.tipo === 'pendiente' && (r.cuenta === 'cobrar' || r.cuenta === 'pagar');
+    });
+    function vivo(p) { return !fuera[p.id]; }
+    function ts(r) { return Number(r.ts) || 0; }
+
+    pend.forEach(function (p) { if (reemplazado[p.id] || saldado[p.id]) fuera[p.id] = 1; });
+
+    var pagoFinal = {};
+    movs.forEach(function (r) {
+      if (r.tipo === 'ingreso' && (r.cuenta === 'caja' || r.cuenta === 'bancos') && r.facturaId &&
+          /^Pago cr[eé]dito/.test(r.ref || '')) {
+        pagoFinal[r.facturaId] = Math.max(pagoFinal[r.facturaId] || 0, ts(r));
+      }
+    });
+    pend.forEach(function (p) {
+      if (!vivo(p) || p.cuenta !== 'cobrar' || !p.facturaId) return;
+      var f = fact[p.facturaId];
+      if (f && f.formaPago && f.formaPago !== 'credito') { fuera[p.id] = 1; return; }
+      var t = pagoFinal[p.facturaId];
+      if (t && ts(p) < t) fuera[p.id] = 1;
+    });
+
+    var egresos = movs.filter(function (r) {
+      return r.tipo === 'egreso' && (r.cuenta === 'caja' || r.cuenta === 'bancos') &&
+             !r.saldaId && /^Pago a /.test(r.ref || '');
+    });
+    var usado = {};
+    pend.filter(function (p) { return vivo(p) && p.cuenta === 'pagar'; })
+      .sort(function (a, b) { return ts(a) - ts(b); })
+      .forEach(function (p) {
+        var esperado = 'Pago a ' + (p.proveedor || '') + (p.ref ? ' · ' + p.ref : '');
+        for (var i = 0; i < egresos.length; i++) {
+          var e = egresos[i];
+          if (usado[e.id] || e.ref !== esperado) continue;
+          if (Math.abs(num(e.monto) - num(p.monto)) > 0.5 || ts(e) < ts(p)) continue;
+          usado[e.id] = true; fuera[p.id] = 1; break;
+        }
+      });
+
+    var porF = {};
+    pend.forEach(function (p) {
+      if (!vivo(p) || p.cuenta !== 'cobrar' || !p.facturaId) return;
+      (porF[p.facturaId] = porF[p.facturaId] || []).push(p);
+    });
+    Object.keys(porF).forEach(function (k) {
+      var a = porF[k];
+      if (a.length < 2) return;
+      a.sort(function (x, y) { return ts(y) - ts(x); });
+      a.slice(1).forEach(function (p) { fuera[p.id] = 1; });
+    });
+    return Object.keys(fuera);
+  }
+
+  /* Aplica pendientesSobrantes() sobre lo guardado en este celular.
+     Devuelve (promesa) cuántos quitó. */
+  function depurarPendientes() {
+    return new Promise(function (res) {
+      if (!window.indexedDB) return res(0);
+      var req;
+      try { req = indexedDB.open('facturaai_db'); } catch (e) { return res(0); }
+      req.onerror = function () { res(0); };
+      req.onsuccess = function () {
+        var dbi = req.result;
+        dbi.onversionchange = function () { try { dbi.close(); } catch (e) {} };
+        if (!dbi.objectStoreNames.contains('facturaai_finanzas') ||
+            !dbi.objectStoreNames.contains('facturaai_facturas')) { dbi.close(); return res(0); }
+        var tx;
+        try { tx = dbi.transaction(['facturaai_finanzas', 'facturaai_facturas'], 'readwrite'); }
+        catch (e) { dbi.close(); return res(0); }
+        var n = 0, movs = null, facts = null;
+        function listo() {
+          if (!movs || !facts) return;
+          var ids = pendientesSobrantes(movs, facts);
+          ids.forEach(function (id) { tx.objectStore('facturaai_finanzas').delete(id); });
+          n = ids.length;
+        }
+        var g1 = tx.objectStore('facturaai_finanzas').getAll();
+        g1.onsuccess = function () { movs = g1.result || []; listo(); };
+        var g2 = tx.objectStore('facturaai_facturas').getAll();
+        g2.onsuccess = function () { facts = g2.result || []; listo(); };
+        tx.oncomplete = function () { dbi.close(); res(n); };
+        tx.onerror = tx.onabort = function () { try { dbi.close(); } catch (e) {} res(0); };
+      };
+    });
+  }
+
   /* Quita de las listas lo que tenga lápida. Devuelve cuántos quitó. */
   function aplicarBorrados(informe) {
     var muertos = {};
@@ -13599,6 +13993,12 @@ var DMSync = (function () {
     });
     if (total && informe) informe.push(total + ' registro(s) borrado(s) o corregido(s) en el otro celular');
     return total;
+  }
+
+  /* ¿Es la variante que no ve costos (encargado)? */
+  function sinCostos() {
+    try { var p = window.DM_PERFIL; return !!(p && (p.ocultar || []).indexOf('costos') >= 0); }
+    catch (e) { return false; }
   }
 
   /* ── Utilidades ──────────────────────────────────────────────────────── */
@@ -13776,11 +14176,41 @@ var DMSync = (function () {
         function aplicar() {
           var entra = paq.idb || {};
 
+          /* 0. Lápidas de remisiones y registros de plata (las de aquí y las
+                que traiga el paquete): se quitan aquí y no vuelven a entrar. */
+          var muertos = {};
+          leerLS('dm_borrados').concat((paq.ls && paq.ls.dm_borrados) || [])
+            .forEach(function (r) { if (r && r.k) muertos[r.k] = true; });
+          var quitadosX = 0;
+          Object.keys(PREF_IDB).forEach(function (s) {
+            if (!actual[s]) return;
+            var pre = PREF_IDB[s];
+            actual[s] = actual[s].filter(function (r) {
+              if (r && muertos[pre + r.id]) { tx.objectStore(s).delete(r.id); quitadosX++; return false; }
+              return true;
+            });
+            entra[s] = (entra[s] || []).filter(function (r) { return !(r && muertos[pre + r.id]); });
+          });
+          if (quitadosX) informe.push(quitadosX + ' remisión(es)/registro(s) de plata borrado(s) en el otro celular');
+
           /* 1. Hechos: se agregan los que no estén */
           IDB_HECHOS.forEach(function (s) {
             if (!actual[s]) return;
             var vistos = {};
-            actual[s].forEach(function (r) { vistos[r.id] = true; });
+            actual[s].forEach(function (r) { vistos[r.id] = r; });
+            /* [28 sep 2026] Remisión EDITADA en el otro celular (misma id,
+               marca «editada» más nueva): se reemplaza la de aquí. */
+            if (s === 'facturaai_facturas') {
+              var editadas = 0;
+              (entra[s] || []).forEach(function (r) {
+                var mia = r && vistos[r.id];
+                if (!mia || num(r.editada) <= num(mia.editada)) return;
+                tx.objectStore(s).put(r);
+                actual[s] = actual[s].map(function (x) { return x.id === r.id ? r : x; });
+                vistos[r.id] = r; editadas++;
+              });
+              if (editadas) informe.push(editadas + ' remisión(es) corregida(s) en el otro celular');
+            }
             var nuevos = (entra[s] || []).filter(function (r) { return r && !vistos[r.id]; });
             /* Cuentas por cobrar/pagar ya pagadas (o abonadas) en el otro
                celular: el pago trae saldaId = el pendiente que cerró. Ese
@@ -13801,8 +14231,45 @@ var DMSync = (function () {
               });
               if (quitados) informe.push(quitados + ' cuenta(s) pendiente(s) saldada(s) en el otro celular');
             }
+            /* celular del encargado: el costo de cada movimiento no se guarda */
+            if (s === 'facturaai_movimientos' && sinCostos()) {
+              nuevos.forEach(function (r) { if (r && 'costo' in r) delete r.costo; });
+            }
+            /* [28 sep 2026] ventas hechas en el celular del encargado llegan sin
+               costo (allá no hay costos): se completan con el costo promedio
+               de aquí, para que la utilidad no salga inflada. */
+            if (s === 'facturaai_facturas' && !sinCostos()) {
+              var cPorKey = {};
+              (actual.facturaai_inventario || []).forEach(function (i) { cPorKey[i.key] = num(i.precioCosto); });
+              nuevos.forEach(function (f) {
+                (f && f.productos || []).forEach(function (p) {
+                  if (num(p.costo_unitario) > 0 || typeof prodKey !== 'function') return;
+                  var c = cPorKey[prodKey(p)];
+                  if (c > 0) p.costo_unitario = c;
+                });
+              });
+            }
             nuevos.forEach(function (r) { tx.objectStore(s).put(r); });
             if (nuevos.length) informe.push(nuevos.length + ' en ' + nombreArea(s));
+            /* [28 sep 2026] Con todo ya unido: quitar cuentas repetidas o ya
+               pagadas (ver pendientesSobrantes) y marcar como pagadas las
+               remisiones que el otro celular cobró completas. */
+            if (s === 'facturaai_finanzas') {
+              var unidos = actual[s].filter(function (r) {
+                return r && !(r.tipo === 'pendiente' && saldados[r.id]);
+              }).concat(nuevos);
+              var facts = (actual.facturaai_facturas || []).concat(informe._factNuevas || []);
+              var sobran = pendientesSobrantes(unidos, facts);
+              sobran.forEach(function (id) { tx.objectStore(s).delete(id); });
+              if (sobran.length) informe.push(sobran.length + ' cuenta(s) repetida(s) o ya pagada(s) quitada(s)');
+              var pagadas = {};
+              nuevos.forEach(function (r) {
+                if (r.tipo === 'ingreso' && r.facturaId && /^Pago cr[eé]dito/.test(r.ref || '')) pagadas[r.facturaId] = true;
+              });
+              facts.forEach(function (f) {
+                if (f && pagadas[f.id] && !f.pagada) { f.pagada = true; tx.objectStore('facturaai_facturas').put(f); }
+              });
+            }
             if (s === 'facturaai_movimientos') informe._movsNuevos = nuevos;
             if (s === 'facturaai_facturas')    informe._factNuevas = nuevos;
           });
@@ -13840,7 +14307,7 @@ var DMSync = (function () {
           var inv = {};
           (actual.facturaai_inventario || []).forEach(function (i) { inv[i.key] = i; });
           var movidos = 0;
-          (informe._movsNuevos || []).forEach(function (m) {
+          (informe._movsNuevos || []).slice().sort(function (a, b) { return num(a.ts) - num(b.ts); }).forEach(function (m) {
             var it = inv[m.prodKey];
             if (!it) {
               /* producto que este celular no conocía: se crea con lo justo */
@@ -13850,6 +14317,19 @@ var DMSync = (function () {
             }
             var s = signoVenta(m.tipo);
             if (!s) return;
+            /* [28 sep 2026] costo promedio ponderado: la producción que llega
+               del otro celular trae su costo (m.costo) y se promedia aquí
+               igual que allá; un turno/lote borrado o corregido (revierte)
+               deshace su parte del promedio. */
+            var cm = num(m.costo), q = num(m.cantidad), s0 = Math.max(0, num(it.stock));
+            if (cm > 0 && q > 0 && !sinCostos()) {
+              if (m.tipo === 'entrada') {
+                it.precioCosto = (s0 + q) > 0 ? ((s0 * num(it.precioCosto)) + q * cm) / (s0 + q) : cm;
+              } else if (m.tipo === 'salida' && m.revierte && s0 - q > 0) {
+                var cr = (s0 * num(it.precioCosto) - q * cm) / (s0 - q);
+                if (cr > 0) it.precioCosto = cr;
+              }
+            }
             it.stock = num(it.stock) + s * num(m.cantidad);
             if (m.tipo === 'salida') {
               it.unidadesVendidas = num(it.unidadesVendidas) + num(m.cantidad);
@@ -14145,6 +14625,9 @@ var DMSync = (function () {
   function esHechoIDB(store) { return IDB_HECHOS.indexOf(store) >= 0; }
   function llaveDe(store, r) {
     if (!r) return null;
+    /* remisión editada: llave nueva para que la sincronización automática
+       la vuelva a mandar (ver unirIDB, «editada») */
+    if (store === 'facturaai_facturas' && r.id && r.editada) return r.id + '@' + r.editada;
     if (esHechoIDB(store)) return r.id || null;
     var h = null;
     LS_HECHOS.forEach(function (x) { if (x.clave === store) h = x; });
@@ -14176,12 +14659,22 @@ var DMSync = (function () {
     });
   }
 
+  /* Al abrir la app: limpiar cuentas repetidas o ya pagadas que hayan
+     quedado de antes (ver pendientesSobrantes). */
+  setTimeout(function () {
+    depurarPendientes().then(function (n) {
+      if (n) { try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {} }
+    });
+  }, 3000);
+
   return {
     aparato: aparato, ponerAparato: ponerAparato, guardarAparato: guardarAparato,
     exportarDia: exportarDia, exportarCatalogo: exportarCatalogo,
     paqueteDia: paqueteDia, paqueteCatalogo: paqueteCatalogo,
     unir: unir, unirArchivo: unirArchivo, pintar: pintar,
     marcarBorrado: marcarBorrado, aplicarBorrados: aplicarBorrados,
+    marcarBorradoIDB: marcarBorradoIDB,
+    pendientesSobrantes: pendientesSobrantes, depurarPendientes: depurarPendientes,
     canalAuto: canalAuto,
     esHechoIDB: esHechoIDB, llaveDe: llaveDe, todosLosHechos: todosLosHechos,
     hechosLocales: hechosLocales
@@ -15027,9 +15520,21 @@ var DMDeshacer = (function () {
 
     if (paquetes <= 0 && combos <= 0) return Promise.resolve(informe);
 
+    /* [28 sep 2026] con qué costo entró este turno, para deshacer también el
+       promedio ponderado (no solo el stock). Se busca en su movimiento de
+       entrada (origen = marca); si es un turno viejo sin esa marca, se
+       recalcula con la misma fórmula del día. */
+    var calc = null;
+    try {
+      var ops = [reg.op1, reg.op2, reg.op3, reg.op4, reg.op5, reg.op6, reg.op7, reg.op8].filter(Boolean);
+      calc = DMCostos.calcular(paquetes, combos, reg.harTotal, reg.gasConsumo,
+                               DMCostos.manoDeObra(ops, reg.maq1, reg.maq2, reg.maq3));
+    } catch (e) {}
     var quitar = [];
-    if (paquetes > 0) quitar.push({ nombre: 'Oblea x 50 unidades', cant: paquetes });
-    if (combos > 0) quitar.push({ nombre: 'Combo de arequipe', cant: combos });
+    if (paquetes > 0) quitar.push({ nombre: 'Oblea x 50 unidades', cant: paquetes, origen: marca,
+                                    costoCalc: calc ? num(calc.costoPaquete) : 0 });
+    if (combos > 0) quitar.push({ nombre: 'Combo de arequipe', cant: combos, origen: marca,
+                                  costoCalc: calc ? num(calc.costoCombo) : 0 });
 
     /* las tarrinas que se llevaron los combos vuelven al arequipe */
     var porCombo = 1;
@@ -15112,7 +15617,8 @@ var DMDeshacer = (function () {
       if (vendible) {
         var nombre = (window.DMArequipeVentas && typeof DMArequipeVentas.nombreVenta === 'function')
           ? DMArequipeVentas.nombreVenta(producto, present) : null;
-        if (nombre) quitar.push({ nombre: nombre, cant: cant });
+        if (nombre) quitar.push({ nombre: nombre, cant: cant,
+          costo: (reg.costoUnit && num(reg.costoUnit[present])) || 0 });
       }
     });
     escribir('dm_ar_prod', prod);
@@ -15128,19 +15634,34 @@ var DMDeshacer = (function () {
     if (typeof dbGetAll !== 'function' || typeof dbPut !== 'function') {
       return Promise.resolve([]);
     }
-    return dbGetAll(STORE_INVENTARIO).then(function (inv) {
+    var leeMovs = (typeof STORE_MOVS !== 'undefined') ? dbGetAll(STORE_MOVS).catch(function () { return []; }) : Promise.resolve([]);
+    return Promise.all([dbGetAll(STORE_INVENTARIO), leeMovs]).then(function (r) {
+      var inv = r[0], movsV = r[1] || [];
       var ps = [], hechas = [];
       items.forEach(function (q) {
         var clave = prodKey({ nombre: q.nombre });
         var it = inv.filter(function (x) { return x.key === clave; })[0];
         if (!it) return;
+        /* [28 sep 2026] deshacer el promedio ponderado: se saca lo que entró
+           con SU costo, y el costo de lo que queda vuelve a ser el de antes. */
+        var costo = num(q.costo);
+        if (!costo && q.origen) {
+          var e = movsV.filter(function (m) { return m && m.tipo === 'entrada' && m.origen === q.origen && m.prodKey === clave; })[0];
+          if (e) costo = num(e.costo);
+        }
+        if (!costo) costo = num(q.costoCalc);
+        var s0 = Math.max(0, num(it.stock)), resto = s0 - q.cant;
+        if (costo > 0 && resto > 0) {
+          var c = (s0 * num(it.precioCosto) - q.cant * costo) / resto;
+          if (c > 0) it.precioCosto = c;
+        }
         it.stock = num(it.stock) - q.cant;          /* puede quedar negativo: es un aviso */
         ps.push(dbPut(STORE_INVENTARIO, it));
         ps.push(dbPut(STORE_MOVS, {
           id: (typeof uid === 'function' ? uid() : String(Date.now() + Math.random())),
           prodKey: clave, tipo: 'salida', cantidad: q.cant,
           fecha: (typeof hoyISO === 'function' ? hoyISO() : ''),
-          ref: motivo, ts: Date.now()
+          ref: motivo, costo: costo || 0, revierte: true, ts: Date.now()
         }));
         hechas.push(q.nombre + ' −' + q.cant + ' (queda ' + it.stock + ')');
       });
@@ -16411,6 +16932,10 @@ var DMCorregir = (function () {
     return dbGetAll(STORE_FINANZAS).then(function (todos) {
       var suyos = todos.filter(function (m) { return m.compraId === compraId; });
       if (!suyos.length) return 0;
+      /* lápida: que el otro celular también la quite (sync.js) */
+      suyos.forEach(function (m) {
+        try { if (window.DMSync && DMSync.marcarBorradoIDB) DMSync.marcarBorradoIDB('facturaai_finanzas', m.id); } catch (e) {}
+      });
       return Promise.all(suyos.map(function (m) { return dbDel(STORE_FINANZAS, m.id); }))
         .then(function () { return suyos.length; });
     }).catch(function (e) { console.warn('quitarDeFinanzas:', e); return 0; });
@@ -17825,7 +18350,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 25/09/2026 08:25</div>
+                margin-top:10px;opacity:.75">Versión del 28/09/2026 15:12</div>
   </div>
 </div>
 
