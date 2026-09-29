@@ -2153,14 +2153,8 @@ body{
     <div class="card-header"><h2>📦 Valor del inventario por producto</h2></div>
     <div id="resumen-inventario"></div>
   </div>
-  <div class="card">
-    <div class="card-header"><h2>⚖️ Balance general (Activo = Pasivo + Patrimonio)</h2>
-      <div class="ch-actions"><button class="btn btn-ghost btn-sm" onclick="exportBalance()">⬇ Excel</button></div>
-    </div>
-    <p style="font-size:.8rem;color:var(--gris);margin-bottom:10px">Lo que tiene el negocio (Activo), lo que debe (Pasivo) y lo que realmente es tuyo (Patrimonio: lo que has aportado más la utilidad acumulada). Los préstamos a empleados y los préstamos/aportes que recibes ya no restan ni suman a la utilidad — viven aquí.</p>
-    <div class="kpi-grid" id="kpi-balance"></div>
-    <div id="balance-detalle" style="margin-top:6px"></div>
-  </div>
+  <!-- [28 sep 2026] La tarjeta «Balance general» se quitó: queda una sola,
+       «⚖️ Activo, pasivo y patrimonio» (situacion.js). -->
 </section>
 
 <!-- ===================== CIERRES MENSUALES ===================== -->
@@ -8897,9 +8891,8 @@ function exportMovimientosBanco(banco){
 
 /* [RESUMEN] estado general: caja, bancos, cuentas por cobrar, inventario por producto */
 function renderResumen(){
-  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),calcularPeriodo(null,hoyISO()),
-      calcularPeriodo(hoyISO().slice(0,8)+'01',hoyISO())]).then(function(r){
-    var movs=r[0],facturas=r[1],inv=r[2],utilHist=r[3],utilMes=r[4];
+  return Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),calcularPeriodo(null,hoyISO())]).then(function(r){
+    var movs=r[0],facturas=r[1],inv=r[2],utilHist=r[3];
     var idsF={}; facturas.forEach(function(f){ idsF[f.id]=true; });
     if(typeof DMSync!=='undefined'&&DMSync.pendientesSobrantes){
       var mSob={}; DMSync.pendientesSobrantes(movs,facturas).forEach(function(id){ mSob[id]=1; });
@@ -8979,17 +8972,7 @@ function renderResumen(){
     var prestamosEmpTot=(typeof DMPrestamos!=='undefined'&&DMPrestamos&&typeof DMPrestamos.saldos==='function')
       ? DMPrestamos.saldos().reduce(function(s,e){return s+(Number(e.saldo)||0);},0) : 0;
     var activoTot=caja+bancosTot+cobrarTot+prestamosEmpTot+valorInv;
-    /* [28 sep 2026] Pasivo con los empleados:
-       - Nómina por pagar = jornal (sin bono) de los turnos/lotes trabajados
-         desde el último pago (DMNomina.calcular, Obleas + Arequipe).
-       - Bonos por pagar = bonos ya acumulados (obleas_bonos + ar_bonos, se
-         pagan en diciembre) + el bono de los turnos aún no liquidados. */
-    var nominaPend=0, bonosPend=0;
-    try{ if(typeof DMNomina!=='undefined'&&DMNomina&&typeof DMNomina.calcular==='function'){
-      ['obleas','arequipe'].forEach(function(l){ var c=DMNomina.calcular(l)||{}; nominaPend+=(Number(c.neto)||0); bonosPend+=(Number(c.bono)||0); }); } }catch(e){}
-    function sumaBonos(k){ try{ var o=JSON.parse(localStorage.getItem(k)||'{}')||{}; return Object.keys(o).reduce(function(s,x){return s+(Number(o[x])||0);},0); }catch(e){ return 0; } }
-    bonosPend+=sumaBonos('obleas_bonos')+sumaBonos('ar_bonos');
-    var pasivoTot=pagarTot+nominaPend+bonosPend;
+    var pasivoTot=pagarTot;
     var patrimonioCalc=capitalNeto+(utilHist.utilidadNeta||0);
     var patrimonioPorDiferencia=activoTot-pasivoTot;
     var diferencia=patrimonioPorDiferencia-patrimonioCalc;
@@ -8998,15 +8981,13 @@ function renderResumen(){
       utilidadAcumulada:utilHist.utilidadNeta,patrimonioCalc:patrimonioCalc,
       patrimonioPorDiferencia:patrimonioPorDiferencia,diferencia:diferencia,
       caja:caja,bancosTot:bancosTot,cobrarTot:cobrarTot,prestamosEmpTot:prestamosEmpTot,
-      valorInv:valorInv,pagarTot:pagarTot,nominaPend:nominaPend,bonosPend:bonosPend,utilidadMes:(utilMes&&utilMes.utilidadNeta)||0};
+      valorInv:valorInv,pagarTot:pagarTot};
     var elKB=vt_gId('kpi-balance');
     if(elKB){
       elKB.innerHTML=
         kpi(fmtMoneda(activoTot),'📈 Activo total','verde')+
         kpi(fmtMoneda(pasivoTot),'📉 Pasivo total','')+
-        kpi(fmtMoneda(patrimonioCalc),'⚖️ Patrimonio','destacado')+
-        kpi(fmtMoneda(utilHist.utilidadNeta||0),'📊 Utilidad acumulada','verde')+
-        kpi(fmtMoneda((utilMes&&utilMes.utilidadNeta)||0),'📅 Utilidad del mes','miel');
+        kpi(fmtMoneda(patrimonioCalc),'⚖️ Patrimonio','destacado');
     }
     var elBD=vt_gId('balance-detalle');
     if(elBD){
@@ -9018,13 +8999,10 @@ function renderResumen(){
         '<div class="mini-row" style="padding:6px 0"><span>👤 Préstamos a empleados pendientes</span><strong>'+fmtMoneda(prestamosEmpTot)+'</strong></div>'+
         '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📦 Valor del inventario</span><strong>'+fmtMoneda(valorInv)+'</strong></div>'+
         '<div class="sec-label" style="margin-top:14px">📉 Pasivo · '+fmtMoneda(pasivoTot)+'</div>'+
-        '<div class="mini-row" style="padding:6px 0"><span>💸 Por pagar (proveedores y préstamos recibidos)</span><strong>'+fmtMoneda(pagarTot)+'</strong></div>'+
-        '<div class="mini-row" style="padding:6px 0"><span>👷 Nómina por pagar a empleados (turnos sin pagar)</span><strong>'+fmtMoneda(nominaPend)+'</strong></div>'+
-        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>🎁 Bonos por pagar a empleados</span><strong>'+fmtMoneda(bonosPend)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>💸 Por pagar (proveedores y préstamos recibidos)</span><strong>'+fmtMoneda(pasivoTot)+'</strong></div>'+
         '<div class="sec-label" style="margin-top:14px">⚖️ Patrimonio · '+fmtMoneda(patrimonioCalc)+'</div>'+
         '<div class="mini-row" style="padding:6px 0"><span>💰 Capital aportado por el dueño (acumulado)</span><strong>'+fmtMoneda(capitalNeto)+'</strong></div>'+
-        '<div class="mini-row" style="padding:6px 0"><span>📊 Utilidad acumulada histórica</span><strong>'+fmtMoneda(utilHist.utilidadNeta||0)+'</strong></div>'+
-        '<div class="mini-row" style="padding:6px 0 6px 18px;border-bottom:1px solid var(--crema2);font-size:.84rem;color:var(--gris)"><span>↳ de esa, utilidad del mes (desde el 1°)</span><strong>'+fmtMoneda((utilMes&&utilMes.utilidadNeta)||0)+'</strong></div>'+
+        '<div class="mini-row" style="padding:6px 0;border-bottom:1px solid var(--crema2)"><span>📊 Utilidad acumulada histórica</span><strong>'+fmtMoneda(utilHist.utilidadNeta||0)+'</strong></div>'+
         '<div class="mini-row" style="padding:10px 0;font-weight:700;border-top:2px solid var(--crema2);margin-top:6px"><span>Activo − Pasivo (patrimonio por diferencia)</span><strong>'+fmtMoneda(patrimonioPorDiferencia)+'</strong></div>'+
         (cuadra
           ? '<p style="font-size:.8rem;color:var(--verde);margin-top:8px">✅ El balance cuadra: Activo = Pasivo + Patrimonio.</p>'
@@ -9040,11 +9018,10 @@ function exportBalance(){
     ['Caja','',b.caja],['Bancos','',b.bancosTot],['Por cobrar (clientes)','',b.cobrarTot],
     ['Préstamos a empleados pendientes','',b.prestamosEmpTot],['Valor del inventario','',b.valorInv],
     ['Total activo','',b.activoTot],[],
-    ['PASIVO','',''],['Por pagar (proveedores y préstamos recibidos)','',b.pagarTot],
-    ['Nómina por pagar a empleados','',b.nominaPend],['Bonos por pagar a empleados','',b.bonosPend],
+    ['PASIVO','',''],['Por pagar (proveedores y préstamos recibidos)','',b.pasivoTot],
     ['Total pasivo','',b.pasivoTot],[],
     ['PATRIMONIO','',''],['Capital aportado (acumulado)','',b.capitalNeto],
-    ['Utilidad acumulada histórica','',b.utilidadAcumulada],['  de esa, utilidad del mes','',b.utilidadMes],['Total patrimonio','',b.patrimonioCalc],[],
+    ['Utilidad acumulada histórica','',b.utilidadAcumulada],['Total patrimonio','',b.patrimonioCalc],[],
     ['Activo − Pasivo (patrimonio por diferencia)','',b.patrimonioPorDiferencia],
     ['Diferencia a revisar','',b.diferencia]];
   generarCSV('balance_general',filas);
@@ -9330,9 +9307,21 @@ function confirmarCuentaPagar(){
    selector. Una deuda muy vieja, de antes de este arreglo, puede no traer
    clasificación guardada: para esas sí se sigue preguntando, para no
    perder ese dato. */
+/* [28 sep 2026] Deudas viejas de compras de Bodega (de antes de que la compra
+   guardara su clase): se sabe que son compra de producción por su compraId o
+   porque dicen «Compra de …». Así no se vuelve a preguntar al pagarlas. */
+function claseDeudaVieja(m){
+  if(!m||m.clase)return null;
+  if(m.compraId||/^Compra de /.test(m.ref||'')){
+    var prod=(m.ref||'').replace(/^Compra de /,'').replace(/\s*\(.*$/,'')||null;
+    return {clase:'produccion',categoria:'Insumos',rubro:'Compra de insumos',producto:prod};
+  }
+  return null;
+}
 function abrirPagoCuenta(movId){
   dbGet(STORE_FINANZAS,movId).then(function(m){
     if(!m)return;
+    var dedu=claseDeudaVieja(m); if(dedu)Object.assign(m,dedu);
     var yaClasificada=!!m.clase;
     /* [FINANCIERO] pagar un préstamo recibido no es un gasto operativo —
        es devolver plata que no era tuya. La etiqueta lo deja claro y,
@@ -9372,6 +9361,7 @@ function confirmarPagoCuenta(movId){
     if(!m)return;
     /* si la deuda ya venía clasificada, se usa esa; si no (una deuda vieja,
        de antes de este arreglo), se lee del formulario que sí se mostró */
+    var dedu=claseDeudaVieja(m); if(dedu)Object.assign(m,dedu);
     var cl=m.clase?{clase:m.clase,categoria:m.categoria,rubro:m.rubro,producto:m.producto}:leerClasificacion('pc');
     /* [ABONOS 24 sep 2026] pago parcial: sale lo pagado y lo que falta queda
        como un pendiente nuevo. saldaId: ver confirmarCobro y sync.js. */
@@ -14659,8 +14649,80 @@ var DMSync = (function () {
     });
   }
 
+  /* [28 sep 2026] Arreglos de una sola vez sobre datos ya guardados (cada uno
+     con su bandera; si hay que repetirlo, se sube la versión):
+     1) deudas viejas de compras de Bodega sin clase → compra de producción
+        (así «Pagar» no vuelve a preguntar qué tipo de compra es);
+     2) ventas guardadas sin costo (las del encargado llegaban así) → se les
+        pone el costo promedio ACTUAL del producto, para que la utilidad no
+        salga inflada. En el celular del encargado no se hace (no ve costos). */
+  var K_MIG_DEUDAS = 'dm_mig_deudas_clase_v1', K_MIG_VCOSTO = 'dm_mig_costo_ventas_v1';
+  function arreglosUnaVez() {
+    var hacerDeudas = !leerFlag(K_MIG_DEUDAS),
+        /* espera a que la oblea ya tenga su costo inicial de $6.500 */
+        hacerVentas = !leerFlag(K_MIG_VCOSTO) && !sinCostos() && leerFlag('dm_mig_costo_oblea_6500_v1');
+    if (!hacerDeudas && !hacerVentas) return Promise.resolve(0);
+    return new Promise(function (res) {
+      if (!window.indexedDB) return res(0);
+      var req;
+      try { req = indexedDB.open('facturaai_db'); } catch (e) { return res(0); }
+      req.onerror = function () { res(0); };
+      req.onsuccess = function () {
+        var dbi = req.result;
+        dbi.onversionchange = function () { try { dbi.close(); } catch (e) {} };
+        var st = ['facturaai_finanzas', 'facturaai_facturas', 'facturaai_inventario'];
+        if (st.some(function (x) { return !dbi.objectStoreNames.contains(x); })) { dbi.close(); return res(0); }
+        var tx = dbi.transaction(st, 'readwrite'), n = 0, datos = {}, pend = 3;
+        st.forEach(function (x) {
+          var g = tx.objectStore(x).getAll();
+          g.onsuccess = function () { datos[x] = g.result || []; if (--pend === 0) aplicar(); };
+        });
+        function aplicar() {
+          if (hacerDeudas) datos[st[0]].forEach(function (m) {
+            if (!m || m.clase || m.cuenta !== 'pagar' || m.tipo !== 'pendiente') return;
+            if (!(m.compraId || /^Compra de /.test(m.ref || ''))) return;
+            m.clase = 'produccion'; m.categoria = m.categoria || 'Insumos';
+            m.rubro = m.rubro || 'Compra de insumos';
+            m.producto = m.producto || String(m.ref || '').replace(/^Compra de /, '').replace(/\s*\(.*$/, '') || null;
+            tx.objectStore(st[0]).put(m); n++;
+          });
+          if (hacerVentas) {
+            var cpk = {};
+            datos[st[2]].forEach(function (i) { cpk[i.key] = num(i.precioCosto); });
+            datos[st[1]].forEach(function (f) {
+              var cambio = false;
+              (f && f.productos || []).forEach(function (p) {
+                if (num(p.costo_unitario) > 0 || typeof prodKey !== 'function') return;
+                var c = cpk[prodKey(p)];
+                if (c > 0) { p.costo_unitario = c; p.costoCorregido = true; cambio = true; }
+              });
+              if (cambio) { tx.objectStore(st[1]).put(f); n++; }
+            });
+          }
+        }
+        tx.oncomplete = function () {
+          dbi.close();
+          if (hacerDeudas) ponerFlag(K_MIG_DEUDAS);
+          if (hacerVentas) ponerFlag(K_MIG_VCOSTO);
+          res(n);
+        };
+        tx.onerror = tx.onabort = function () { try { dbi.close(); } catch (e) {} res(0); };
+      };
+    });
+  }
+  function leerFlag(k) { try { return !!localStorage.getItem(k); } catch (e) { return true; } }
+  function ponerFlag(k) { try { localStorage.setItem(k, new Date().toISOString()); } catch (e) {} }
+
   /* Al abrir la app: limpiar cuentas repetidas o ya pagadas que hayan
      quedado de antes (ver pendientesSobrantes). */
+  /* los arreglos de una vez van después del costo inicial de la oblea
+     (costos.js, a los 1,5 s), para que las ventas tomen ya ese costo */
+  setTimeout(function () {
+    arreglosUnaVez().then(function (n) {
+      if (n) { try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {} }
+      if (!leerFlag(K_MIG_VCOSTO) && !sinCostos()) setTimeout(function () { arreglosUnaVez(); }, 15000);
+    });
+  }, 5000);
   setTimeout(function () {
     depurarPendientes().then(function (n) {
       if (n) { try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {} }
@@ -14675,6 +14737,7 @@ var DMSync = (function () {
     marcarBorrado: marcarBorrado, aplicarBorrados: aplicarBorrados,
     marcarBorradoIDB: marcarBorradoIDB,
     pendientesSobrantes: pendientesSobrantes, depurarPendientes: depurarPendientes,
+    arreglosUnaVez: arreglosUnaVez,
     canalAuto: canalAuto,
     esHechoIDB: esHechoIDB, llaveDe: llaveDe, todosLosHechos: todosLosHechos,
     hechosLocales: hechosLocales
@@ -17008,8 +17071,9 @@ var DMCorregir = (function () {
    DMSituacion — Activo, pasivo y patrimonio. Sencillo.
 
        ACTIVO      = disponible (caja + bancos) + cuentas por cobrar + inventario
-       PASIVO      = cuentas por pagar
-       PATRIMONIO  = activo − pasivo
+       PASIVO      = cuentas por pagar + nómina por pagar + bonos por pagar
+       PATRIMONIO  = activo − pasivo  (se muestra la utilidad acumulada y la
+                     del mes dentro de él; el resto es capital y otros)
 
    Nada más. Sin líneas manuales, sin comprobaciones cruzadas.
 
@@ -17071,13 +17135,52 @@ var DMSituacion = (function () {
     return num(t.cant) * num(t.costoPromedio);
   }
 
+  /* [28 sep 2026] Lo que se les debe a los empleados:
+     - nómina: jornal (sin bono) de turnos/lotes trabajados desde el último
+       pago (DMNomina.calcular, Obleas + Arequipe);
+     - bonos: acumulados (obleas_bonos + ar_bonos, se pagan en diciembre) +
+       el bono de los turnos aún no liquidados. */
+  function deudaEmpleados() {
+    var nomina = 0, bonos = 0;
+    try {
+      if (window.DMNomina && typeof DMNomina.calcular === 'function') {
+        ['obleas', 'arequipe'].forEach(function (l) {
+          var c = DMNomina.calcular(l) || {};
+          nomina += num(c.neto); bonos += num(c.bono);
+        });
+      }
+    } catch (e) {}
+    function suma(k) {
+      var o = leerLS(k, {}) || {};
+      return Object.keys(o).reduce(function (s, x) { return s + num(o[x]); }, 0);
+    }
+    bonos += suma('obleas_bonos') + suma('ar_bonos');
+    return { nomina: nomina, bonos: bonos };
+  }
+  function veUtilidad() {
+    try { var p = window.DM_PERFIL; return !(p && (p.ocultar || []).indexOf('utilidad') >= 0); }
+    catch (e) { return true; }
+  }
+  function utilidad(desde, hasta) {
+    if (!veUtilidad() || typeof calcularPeriodo !== 'function') return Promise.resolve(null);
+    return calcularPeriodo(desde, hasta).then(function (u) { return u ? num(u.utilidadNeta) : null; })
+      .catch(function () { return null; });
+  }
+
   /* ── El cálculo ──────────────────────────────────────────────────────── */
   function calcular() {
     if (typeof dbGetAll !== 'function') return Promise.resolve(null);
+    var hoy = (typeof hoyISO === 'function') ? hoyISO() : new Date().toISOString().slice(0, 10);
     return Promise.all([
-      dbGetAll(STORE_FINANZAS), dbGetAll(STORE_FACTURAS), dbGetAll(STORE_INVENTARIO)
+      dbGetAll(STORE_FINANZAS), dbGetAll(STORE_FACTURAS), dbGetAll(STORE_INVENTARIO),
+      utilidad(null, hoy), utilidad(hoy.slice(0, 8) + '01', hoy)
     ]).then(function (r) {
-      var movs = r[0], facturas = r[1], inv = r[2];
+      var movs = r[0], facturas = r[1], inv = r[2], utilAcum = r[3], utilMes = r[4];
+      /* cuentas repetidas o ya pagadas no cuentan (ver DMSync.pendientesSobrantes) */
+      if (window.DMSync && typeof DMSync.pendientesSobrantes === 'function') {
+        var sob = {}; DMSync.pendientesSobrantes(movs, facturas).forEach(function (id) { sob[id] = 1; });
+        movs = movs.filter(function (m) { return !sob[m.id]; });
+      }
 
       /* Los movimientos de facturas borradas no cuentan. */
       var idsF = {}; facturas.forEach(function (f) { idsF[f.id] = true; });
@@ -17105,7 +17208,25 @@ var DMSituacion = (function () {
 
       var disponible = caja + bancos;
       var activo = disponible + cobrar + inventario;
-      var pasivo = pagar;
+      /* [28 sep 2026] Capital de los socios: el último valor registrado con
+         «✏️ Registrar capital» (no mueve caja ni bancos) + los aportes o
+         retiros del dueño hechos DESPUÉS de ese registro. Si nunca se ha
+         registrado, se suman todos los aportes y el saldo inicial. */
+      var decl = null;
+      movs.forEach(function (m) {
+        if (m && m.clase === 'capital_declarado' && (!decl || num(m.ts) > num(decl.ts))) decl = m;
+      });
+      var capital = decl ? num(decl.monto) : 0;
+      movs.forEach(function (m) {
+        if (!m || (m.clase !== 'capital' && m.clase !== 'saldo_inicial')) return;
+        if (m.cuenta !== 'caja' && m.cuenta !== 'bancos') return;
+        if (m.facturaId && !idsF[m.facturaId]) return;
+        if (decl && num(m.ts) <= num(decl.ts)) return;
+        capital += (m.tipo === 'ingreso' ? 1 : -1) * num(m.monto);
+      });
+      var emp = deudaEmpleados();
+      var pasivo = pagar + emp.nomina + emp.bonos;
+      var patrimonio = activo - pasivo;
 
       return {
         caja: caja, bancos: bancos, disponible: disponible,
@@ -17113,8 +17234,11 @@ var DMSituacion = (function () {
         terminado: terminado, tarrinas: tarrinas, insumos: insumos,
         inventario: inventario,
         activo: activo,
-        pagar: pagar, pasivo: pasivo,
-        patrimonio: activo - pasivo
+        pagar: pagar, nomina: emp.nomina, bonos: emp.bonos, pasivo: pasivo,
+        utilAcum: utilAcum, utilMes: utilMes,
+        capital: capital, capitalFecha: decl ? decl.fecha : null,
+        diferencia: (utilAcum == null ? null : patrimonio - capital - utilAcum),
+        patrimonio: patrimonio
       };
     });
   }
@@ -17164,11 +17288,26 @@ var DMSituacion = (function () {
         '<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;' +
         'letter-spacing:.5px;color:var(--gris);margin:16px 0 2px">Pasivo</div>' +
         linea('Cuentas por pagar', d.pagar) +
+        linea('Nómina por pagar (salarios)', d.nomina, { detalle: 'turnos trabajados desde el último pago' }) +
+        linea('Bonos por pagar', d.bonos, { detalle: 'acumulados para diciembre' }) +
         linea('Total pasivo', d.pasivo, { total: true }) +
 
         '<div style="font-size:.7rem;font-weight:700;text-transform:uppercase;' +
         'letter-spacing:.5px;color:var(--gris);margin:16px 0 2px">Patrimonio</div>' +
-        linea('Activo menos pasivo', d.patrimonio, { total: true });
+        (d.utilAcum == null ? '' :
+          linea('Capital de los socios', d.capital,
+                { detalle: d.capitalFecha ? 'registrado el ' + d.capitalFecha : 'aún no registrado · usa ✏️ Registrar capital' }) +
+          linea('Utilidad acumulada', d.utilAcum,
+                { detalle: 'de esa, utilidad del mes: ' + pesos(d.utilMes) }) +
+          (Math.abs(d.diferencia) >= 1
+            ? linea('Diferencia por revisar', d.diferencia,
+                    { detalle: 'activo − pasivo − capital − utilidad; viene de registros que no cuadran' })
+            : '')) +
+        linea('Total patrimonio', d.patrimonio, { total: true }) +
+        (veUtilidad()
+          ? '<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="DMSituacion.abrirCapital()">' +
+            '✏️ Registrar capital</button></div>'
+          : '');
     }).catch(function (e) {
       console.warn('DMSituacion:', e);
       caja.innerHTML = '<p style="font-size:.8rem;color:var(--gris)">' +
@@ -17222,7 +17361,47 @@ var DMSituacion = (function () {
     document.addEventListener('DOMContentLoaded', function () { arrancar(0); });
   } else { arrancar(0); }
 
-  return { calcular: calcular, pintar: pintar, instalar: instalar };
+  /* ── Registrar el capital (sin mover caja ni bancos) ─────────────────── */
+  function abrirCapital() {
+    if (typeof abrirModal !== 'function') return;
+    calcular().then(function (d) {
+      var hoy = (typeof hoyISO === 'function') ? hoyISO() : new Date().toISOString().slice(0, 10);
+      abrirModal(
+        '<h3>✏️ Capital de los socios</h3>' +
+        '<p style="font-size:.82rem;margin-bottom:10px">Es la parte del patrimonio que pusieron los socios. ' +
+        '<strong>No entra plata a caja ni a bancos</strong>: solo reparte bien lo que el negocio tiene hoy ' +
+        'entre capital y utilidad. Si lo vuelves a registrar, queda el último.</p>' +
+        (d ? '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">Patrimonio hoy: <strong>' +
+             pesos(d.patrimonio) + '</strong> · capital registrado: <strong>' + pesos(d.capital) + '</strong></p>' : '') +
+        '<div style="display:flex;gap:8px"><div style="flex:1.3"><label>Capital</label>' +
+        '<input type="number" id="dmcap-monto" value="' + (d ? Math.round(d.capital) : '') + '"></div>' +
+        '<div style="flex:1"><label>Fecha</label><input type="date" id="dmcap-fecha" value="' + hoy + '"></div></div>' +
+        '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="DMSituacion.guardarCapital()">Guardar</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>');
+    });
+  }
+  function guardarCapital() {
+    var el = document.getElementById('dmcap-monto');
+    var monto = el ? num(el.value) : 0;
+    if (!(monto >= 0) || !el || el.value === '') { if (typeof toast === 'function') toast('Escribe el valor del capital', 'err'); return Promise.resolve(); }
+    var fecha = (document.getElementById('dmcap-fecha') || {}).value ||
+                ((typeof hoyISO === 'function') ? hoyISO() : new Date().toISOString().slice(0, 10));
+    /* cuenta 'patrimonio' y tipo 'registro': ningún saldo de caja/bancos ni la
+       utilidad lo cuentan; viaja al otro celular como cualquier registro */
+    return dbPut(STORE_FINANZAS, {
+      id: (typeof uid === 'function' ? uid() : String(Date.now())),
+      cuenta: 'patrimonio', tipo: 'registro', clase: 'capital_declarado',
+      monto: monto, fecha: fecha, ref: 'Capital de los socios', facturaId: null,
+      banco: null, cliente: null, ts: Date.now()
+    }).then(function () {
+      if (typeof cerrarModal === 'function') cerrarModal();
+      if (typeof toast === 'function') toast('Capital registrado', 'ok');
+      return pintar();
+    });
+  }
+
+  return { calcular: calcular, pintar: pintar, instalar: instalar,
+           abrirCapital: abrirCapital, guardarCapital: guardarCapital };
 })();
 
 </script>
@@ -18350,7 +18529,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 28/09/2026 15:12</div>
+                margin-top:10px;opacity:.75">Versión del 28/09/2026 19:22</div>
   </div>
 </div>
 
