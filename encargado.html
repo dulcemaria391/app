@@ -14120,9 +14120,14 @@ var DMSync = (function () {
     { clave: 'dm_ar_regs',              llave: function (r) { return 'L' + r.id; },
       area: 'lotes de arequipe' },
     { clave: 'obleas_inv_movimientos',  llave: function (r) {
+        /* [30 sep 2026] el inventario inicial lo genera cada celular con su
+           propia hora: se identifica solo por el insumo, para que no se sume dos veces */
+        if (r.proveedor === 'Inventario inicial') return 'IOinicial|' + (r.insumo || '');
         return 'IO' + (r.ts || r.fecha) + '|' + (r.insumo || '') + '|' + (r.tipo || '') + '|' + (r.cantidad || 0); },
       area: 'movimientos de insumos (obleas)' },
-    { clave: 'dm_ar_mov',               llave: function (r) { return 'IA' + r.id; },
+    { clave: 'dm_ar_mov',               llave: function (r) {
+        if (/^Inventario inicial/.test(r.ref || '')) return 'IAinicial|' + (r.ins_id || '');
+        return 'IA' + r.id; },
       area: 'movimientos de insumos (arequipe)' },
     { clave: 'dm_ar_prod_mov',          llave: function (r) { return 'PA' + r.id; },
       area: 'stock de arequipe producido' },
@@ -14747,52 +14752,199 @@ var DMSync = (function () {
 
     aplicarBorrados(informe);
 
-    /* Saldo de insumos de OBLEAS: se mueve con los movimientos nuevos */
-    var movOb = informe._nuevosLS['obleas_inv_movimientos'] || [];
-    if (movOb.length) {
-      var invOb = leerObj('obleas_inventario'), n = 0;
-      movOb.forEach(function (m) {
-        var k = m.insumo; if (!k) return;
-        if (!invOb[k]) invOb[k] = { stock: 0, costoPromedio: 0 };
-        var signo = (m.tipo === 'entrada' || m.tipo === 'compra') ? 1
-                  : (m.tipo === 'salida' || m.tipo === 'consumo') ? -1 : 0;
-        if (!signo) return;
-        invOb[k].stock = num(invOb[k].stock) + signo * num(m.cantidad);
-        n++;
-      });
-      if (n) { try { localStorage.setItem('obleas_inventario', JSON.stringify(invOb)); } catch (e) {} }
+    /* [30 sep 2026] Saldos de insumos y de arequipe producido: se
+       RECALCULAN desde el historial completo (ver saldosDesdeHistorial), ya
+       no se suman los movimientos que llegan. Antes se sumaban en un campo
+       («stock») que Arequipe no lee — usa cantActual / cant — y por eso el
+       encargado quedaba en negativo. Solo se tocan los que recibieron algo. */
+    var tocados = { obleas: {}, arequipe: {}, producto: {} };
+    (informe._nuevosLS['obleas_inv_movimientos'] || []).forEach(function (m) { if (m && m.insumo) tocados.obleas[m.insumo] = 1; });
+    (informe._nuevosLS['dm_ar_mov'] || []).forEach(function (m) { if (m && m.ins_id) tocados.arequipe[m.ins_id] = 1; });
+    (informe._nuevosLS['dm_ar_prod_mov'] || []).forEach(function (m) { if (m && m.presentacion) tocados.producto[clavePrenda(m)] = 1; });
+    var cambios = saldosDesdeHistorial(tocados).filter(cambia);
+    if (cambios.length) {
+      aplicarSaldos(cambios);
+      informe.push(cambios.length + ' saldo(s) de insumos recalculados desde el historial');
     }
+  }
 
-    /* Saldo de insumos de AREQUIPE */
-    var movAr = informe._nuevosLS['dm_ar_mov'] || [];
-    if (movAr.length) {
-      var invAr = leerObj('dm_ar_inv'), m2 = 0;
-      movAr.forEach(function (m) {
-        var k = m.ins_id; if (!k) return;
-        if (!invAr[k]) invAr[k] = { stock: 0, costoPromedio: 0 };
-        var signo = (m.tipo === 'compra' || m.tipo === 'entrada') ? 1
-                  : (m.tipo === 'consumo' || m.tipo === 'salida') ? -1 : 0;
-        if (!signo) return;
-        invAr[k].stock = num(invAr[k].stock) + signo * num(m.cant);
-        m2++;
-      });
-      if (m2) { try { localStorage.setItem('dm_ar_inv', JSON.stringify(invAr)); } catch (e) {} }
-    }
+  /* ── Saldos desde el historial ─────────────────────────────────────────
+     El saldo de cada insumo = entradas − salidas de TODO su historial, igual
+     que replay() de corregir.js. Así los dos celulares, con los mismos
+     movimientos, llegan al mismo saldo aunque los hayan recibido en otro
+     orden o por partes.
 
-    /* Saldo de arequipe ya producido */
-    var movPr = informe._nuevosLS['dm_ar_prod_mov'] || [];
-    if (movPr.length) {
-      var prod = leerObj('dm_ar_prod'), m3 = 0;
-      movPr.forEach(function (m) {
-        var k = m.presentacion; if (!k) return;
-        if (!prod[k]) prod[k] = { stock: 0, costoPromedio: 0 };
-        var signo = (m.tipo === 'entrada') ? 1 : (m.tipo === 'salida') ? -1 : 0;
-        if (!signo) return;
-        prod[k].stock = num(prod[k].stock) + signo * num(m.cant);
-        m3++;
-      });
-      if (m3) { try { localStorage.setItem('dm_ar_prod', JSON.stringify(prod)); } catch (e) {} }
+     El inventario inicial cuenta UNA sola vez por insumo: cada celular que
+     arrancó vacío generó el suyo con su propia hora, y al unir quedaban dos
+     (841 kg de harina se volvían 1.682).
+
+     Solo la CANTIDAD: el costo promedio no se toca aquí. Un insumo sin
+     ningún movimiento se deja como está (no hay historial para recalcular). */
+  var K_MIG_SALDOS = 'dm_mig_saldos_historial_v1';
+
+  function clavePrenda(m) {
+    var producto = m.producto || 'Arequipe';
+    if (window.DMArequipeVentas && typeof DMArequipeVentas.claveStock === 'function') {
+      return DMArequipeVentas.claveStock(producto, m.presentacion);
     }
+    return /LECHE/i.test(producto) ? 'lc_' + m.presentacion : m.presentacion;
+  }
+
+  /* hora de un movimiento de arequipe: su id empieza por Date.now() */
+  function horaId(m) {
+    var t = parseFloat(String(m.id == null ? '' : m.id));
+    return isFinite(t) && t > 1e12 ? t : (Date.parse(m.fecha || '') || 0);
+  }
+
+  /* Las tres líneas, con sus campos. Cada movimiento se traduce a
+     { id, orden, sub, signo, cant, inicial, costo }. */
+  var LINEAS = [
+    { linea: 'obleas', movs: 'obleas_inv_movimientos', saldo: 'obleas_inventario', campo: 'stock',
+      traducir: function (m, i) {
+        return { id: m.insumo, orden: Date.parse(m.ts || '') || Date.parse(m.fecha || '') || 0, sub: i,
+          signo: (m.tipo === 'entrada' || m.tipo === 'compra') ? 1 : (m.tipo === 'salida' || m.tipo === 'consumo') ? -1 : 0,
+          cant: num(m.cantidad), inicial: m.proveedor === 'Inventario inicial', costo: num(m.costoUnitario) };
+      },
+      nuevo: function (id) {
+        var c = (typeof INSUMOS_CAT !== 'undefined' && INSUMOS_CAT[id]) || {};
+        return { stock: 0, costoPromedio: 0, stockMin: c.stockMin || 0 };
+      } },
+    { linea: 'arequipe', movs: 'dm_ar_mov', saldo: 'dm_ar_inv', campo: 'cantActual',
+      traducir: function (m, i) {
+        return { id: m.ins_id, orden: horaId(m), sub: -i,     /* la lista va del más nuevo al más viejo */
+          signo: (m.tipo === 'compra' || m.tipo === 'entrada') ? 1 : (m.tipo === 'consumo' || m.tipo === 'salida') ? -1 : 0,
+          cant: num(m.cant), inicial: /^Inventario inicial/.test(m.ref || ''), costo: num(m.costoUnit) };
+      },
+      nuevo: function () { return { cantActual: 0, costoPromedio: 0, minimo: 0 }; } },
+    { linea: 'producto', movs: 'dm_ar_prod_mov', saldo: 'dm_ar_prod', campo: 'cant',
+      traducir: function (m, i) {
+        return { id: m.presentacion ? clavePrenda(m) : null, orden: horaId(m), sub: -i,
+          signo: m.tipo === 'entrada' ? 1 : m.tipo === 'salida' ? -1 : 0,
+          cant: num(m.cant), inicial: false, costo: num(m.costoUnit),
+          producto: m.producto || 'Arequipe', presentacion: m.presentacion };
+      },
+      nuevo: function (id, ej) {
+        return { cant: 0, costoPromedio: 0, producto: ej.producto, presentacion: ej.presentacion };
+      } }
+  ];
+
+  /* soloIds: { obleas: {id:1}, arequipe: {...}, producto: {...} } o null = todos.
+     Devuelve una fila por insumo con historial: { linea, id, actual, nuevo, ej } */
+  function saldosDesdeHistorial(soloIds) {
+    var filas = [];
+    LINEAS.forEach(function (L) {
+      var solo = soloIds ? (soloIds[L.linea] || {}) : null;
+      if (solo && !Object.keys(solo).length) return;
+      var porId = {};
+      leerLS(L.movs).forEach(function (m, i) {
+        if (!m) return;
+        var t = L.traducir(m, i);
+        if (!t.id || !t.signo || (solo && !solo[t.id])) return;
+        (porId[t.id] = porId[t.id] || []).push(t);
+      });
+      var saldos = leerObj(L.saldo);
+      Object.keys(porId).forEach(function (id) {
+        var movs = porId[id].sort(function (a, b) { return (a.orden - b.orden) || (a.sub - b.sub); });
+        var s = 0, yaInicial = false;
+        movs.forEach(function (t) {
+          if (t.inicial) { if (yaInicial) return; yaInicial = true; }
+          s += t.signo * t.cant;
+        });
+        filas.push({ linea: L.linea, id: id, actual: num((saldos[id] || {})[L.campo]),
+                     nuevo: Math.round(s * 1e6) / 1e6, ej: movs[movs.length - 1] });
+      });
+    });
+    return filas;
+  }
+  function cambia(f) { return Math.abs(f.nuevo - f.actual) > 0.0005; }
+
+  function aplicarSaldos(filas) {
+    LINEAS.forEach(function (L) {
+      var mias = filas.filter(function (f) { return f.linea === L.linea; });
+      if (!mias.length) return;
+      var saldos = leerObj(L.saldo);
+      mias.forEach(function (f) {
+        if (!saldos[f.id]) {
+          saldos[f.id] = L.nuevo(f.id, f.ej);
+          saldos[f.id].costoPromedio = f.ej.costo;   /* insumo que este celular no tenía */
+        }
+        saldos[f.id][L.campo] = f.nuevo;
+      });
+      try { localStorage.setItem(L.saldo, JSON.stringify(saldos)); } catch (e) {}
+    });
+  }
+
+  function nombreSaldo(f) {
+    try {
+      if (f.linea === 'obleas' && typeof INSUMOS_CAT !== 'undefined' && INSUMOS_CAT[f.id]) {
+        return INSUMOS_CAT[f.id].nombre + ' (' + INSUMOS_CAT[f.id].unidad + ')';
+      }
+      if (f.linea === 'arequipe') {
+        var todos = (typeof INSUMOS_DEF !== 'undefined' ? INSUMOS_DEF : [])
+          .concat(typeof EMPAQUES_DEF !== 'undefined' ? EMPAQUES_DEF : []);
+        for (var i = 0; i < todos.length; i++) {
+          if (todos[i].id === f.id) return todos[i].nombre + ' (' + todos[i].unidad + ')';
+        }
+      }
+      if (f.linea === 'producto') {
+        return (/^lc_/.test(f.id) ? 'Leche condensada' : 'Arequipe') + ' · ' + f.id.replace(/^lc_/, '');
+      }
+    } catch (e) {}
+    return f.id;
+  }
+
+  /* Una vez por celular: recalcular TODOS los saldos, mostrando antes la
+     tabla de lo que cambia. La bandera solo se pone al pulsar «Aplicar» (o
+     si no hay nada que cambiar); con «Ahora no» vuelve a preguntar al abrir. */
+  function revisarSaldosUnaVez() {
+    if (leerFlag(K_MIG_SALDOS)) return;
+    var cambios = saldosDesdeHistorial(null).filter(cambia);
+    if (!cambios.length) { ponerFlag(K_MIG_SALDOS); return; }
+    mostrarTablaSaldos(cambios);
+  }
+
+  function mostrarTablaSaldos(cambios) {
+    if (!document.body || document.getElementById('dm-saldos-mig')) return;
+    var e = function (s) {
+      return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
+    };
+    var n = function (v) { return Number(v).toLocaleString('es-CO', { maximumFractionDigits: 3 }); };
+    var titulos = { obleas: 'Obleas', arequipe: 'Arequipe', producto: 'Arequipe producido' };
+    var filas = cambios.map(function (f) {
+      var d = f.nuevo - f.actual;
+      return '<tr><td>' + e(titulos[f.linea]) + '</td><td>' + e(nombreSaldo(f)) + '</td>' +
+        '<td style="text-align:right">' + n(f.actual) + '</td>' +
+        '<td style="text-align:right"><b>' + n(f.nuevo) + '</b></td>' +
+        '<td style="text-align:right;color:' + (d < 0 ? '#b3261e' : '#1e7b34') + '">' + (d > 0 ? '+' : '') + n(d) + '</td></tr>';
+    }).join('');
+    var caja = document.createElement('div');
+    caja.id = 'dm-saldos-mig';
+    caja.setAttribute('style', 'position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.45);' +
+      'display:flex;align-items:center;justify-content:center;padding:16px');
+    caja.innerHTML =
+      '<div style="background:#fff;color:#3b2a1a;border-radius:14px;max-width:560px;width:100%;' +
+        'max-height:88vh;overflow:auto;padding:16px;font-size:.85rem;box-shadow:0 8px 30px rgba(0,0,0,.3)">' +
+      '<h3 style="margin:0 0 6px">📦 Revisar saldos de insumos</h3>' +
+      '<p style="margin:0 0 10px">Los saldos se van a recalcular desde el historial de movimientos, ' +
+        'para que este celular y el otro queden iguales. El inventario inicial cuenta una sola vez. ' +
+        'Estos son los que cambian:</p>' +
+      '<table style="width:100%;border-collapse:collapse" cellpadding="4">' +
+        '<thead><tr style="border-bottom:1px solid #ccc;text-align:left"><th>Módulo</th><th>Insumo</th>' +
+        '<th style="text-align:right">Actual</th><th style="text-align:right">Recalculado</th>' +
+        '<th style="text-align:right">Cambio</th></tr></thead><tbody>' + filas + '</tbody></table>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
+        '<button type="button" id="dm-saldos-no" class="btn btn-ghost btn-sm">Ahora no</button>' +
+        '<button type="button" id="dm-saldos-si" class="btn btn-primary btn-sm">Aplicar</button></div></div>';
+    document.body.appendChild(caja);
+    document.getElementById('dm-saldos-no').onclick = function () { caja.remove(); };
+    document.getElementById('dm-saldos-si').onclick = function () {
+      aplicarSaldos(cambios);
+      ponerFlag(K_MIG_SALDOS);
+      caja.remove();
+      ['renderInvStock', 'inv_render', 'refrescarTodo'].forEach(function (fn) {
+        try { if (typeof window[fn] === 'function') window[fn](); } catch (x) {}
+      });
+    };
   }
 
   /* El catálogo que manda el dueño: productos, precios y clientes. */
@@ -15075,6 +15227,8 @@ var DMSync = (function () {
       if (!leerFlag(K_MIG_VCOSTO) && !sinCostos()) setTimeout(function () { arreglosUnaVez(); }, 15000);
     });
   }, 5000);
+  /* [30 sep 2026] después de que Obleas/Arequipe carguen su inventario */
+  setTimeout(function () { try { revisarSaldosUnaVez(); } catch (e) { console.warn('revisarSaldosUnaVez:', e); } }, 4000);
   setTimeout(function () {
     depurarPendientes().then(function (n) {
       if (n) { try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {} }
@@ -15090,6 +15244,8 @@ var DMSync = (function () {
     marcarBorradoIDB: marcarBorradoIDB,
     pendientesSobrantes: pendientesSobrantes, depurarPendientes: depurarPendientes,
     arreglosUnaVez: arreglosUnaVez,
+    saldosDesdeHistorial: saldosDesdeHistorial, aplicarSaldos: aplicarSaldos,
+    revisarSaldosUnaVez: revisarSaldosUnaVez,
     canalAuto: canalAuto,
     esHechoIDB: esHechoIDB, llaveDe: llaveDe, todosLosHechos: todosLosHechos,
     hechosLocales: hechosLocales
@@ -19178,7 +19334,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 29/09/2026 22:28</div>
+                margin-top:10px;opacity:.75">Versión del 30/09/2026 11:01</div>
   </div>
 </div>
 
