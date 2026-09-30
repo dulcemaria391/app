@@ -2031,6 +2031,7 @@ body{
       <div class="ch-actions">
         <button class="btn btn-success btn-sm" onclick="abrirIngreso()">➕ Ingreso</button>
         <button class="btn btn-ghost btn-sm" onclick="abrirGastoCaja()">➖ Gasto / retiro</button>
+        <button class="btn btn-ghost btn-sm" onclick="abrirTraslado()">🔁 Traslado</button>
       </div>
     </div>
     <div id="lista-caja"></div>
@@ -2047,7 +2048,8 @@ body{
   </div>
   <div class="card">
     <div class="card-header"><h2>🏦 Bancos</h2>
-      <div class="ch-actions"><button class="btn btn-ghost btn-sm" onclick="abrirGastoBanco()">➖ Salida de banco</button></div>
+      <div class="ch-actions"><button class="btn btn-ghost btn-sm" onclick="abrirGastoBanco()">➖ Salida de banco</button>
+        <button class="btn btn-ghost btn-sm" onclick="abrirTraslado()">🔁 Traslado</button></div>
     </div>
     <div id="lista-bancos"></div>
   </div>
@@ -8421,7 +8423,7 @@ function exportGastos(){
   pedirRangoFechas('Gastos por categoría',function(desde,hasta){
     Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS)]).then(function(r){
       var movs=r[0],facturas=r[1]; var idsF={}; facturas.forEach(function(f){idsF[f.id]=true;});
-      var gs=movs.filter(function(m){ return m.tipo==='egreso' && enRango(m.fecha,desde,hasta) && !(m.facturaId&&!idsF[m.facturaId]); });
+      var gs=movs.filter(function(m){ return m.tipo==='egreso' && !esTraslado(m) && enRango(m.fecha,desde,hasta) && !(m.facturaId&&!idsF[m.facturaId]); });
       var porCat={}; gs.forEach(function(m){ var k=(m.clase==='produccion'?'[Producción] ':'[Operativo] ')+(m.categoria||'Otros'); porCat[k]=(porCat[k]||0)+(Number(m.monto)||0); });
       var filas=[['Categoria','Total gastado']];
       Object.keys(porCat).sort(function(a,b){return porCat[b]-porCat[a];}).forEach(function(k){ filas.push([k,porCat[k]]); });
@@ -8501,7 +8503,7 @@ function renderReportes(){
        negocio (ver costos.js:prestar y ventas.html:confirmarIngreso). */
     var idsF={}; facturas.forEach(function(f){ idsF[f.id]=true; });
     function esMovBalance(m){ return m.clase==='financiero'||m.clase==='capital'; }
-    var totalGastosOp=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase!=='produccion'&&!esMovBalance(m))?(Number(m.monto)||0):0); },0);
+    var totalGastosOp=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase!=='produccion'&&!esMovBalance(m)&&!esTraslado(m))?(Number(m.monto)||0):0); },0);
     var totalProduccion=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; return s+((m.tipo==='egreso'&&m.clase==='produccion')?(Number(m.monto)||0):0); },0);
     var totalFinanciero=finanzas.reduce(function(s,m){ if(m.facturaId&&!idsF[m.facturaId])return s; if(!esMovBalance(m))return s; return s+((m.tipo==='egreso'?-1:1)*(Number(m.monto)||0)); },0);
     var utilidadNeta=utilidad-totalGastosOp;
@@ -8606,6 +8608,7 @@ function chartOpts(hideLegend){
    INICIO (dashboard)
    ============================================================ */
 function vt_renderInicio(){
+  try{ pintarMisGastosHoy(); }catch(e){}
   return Promise.all([dbGetAll(STORE_FACTURAS),dbGetAll(STORE_INVENTARIO),dbGetAll(STORE_CLIENTES),dbGetAll(STORE_FINANZAS)]).then(function(r){
     var facturas=r[0],inv=r[1],clientes=r[2],fin=r[3];
     /* ventas últimos 30 días */
@@ -8743,11 +8746,9 @@ function renderFinanzas(){
 
     /* Caja: últimos movimientos (día a día, como siempre) */
     var movCaja=movs.filter(function(m){return m.cuenta==='caja';}).sort(function(a,b){return b.ts-a.ts;}).slice(0,15);
-    vt_gId('lista-caja').innerHTML=movCaja.length?movCaja.map(function(m){
-      var pos=m.tipo==='ingreso'; return '<div class="mini-row" style="padding:7px 0;border-bottom:1px solid var(--crema2)">'+
-        '<span>'+(pos?'⬆️':'⬇️')+' '+fmtFecha(m.fecha)+' · '+esc(m.ref||'')+(m.cliente?' ('+esc(m.cliente)+')':'')+'</span>'+
-        '<strong style="color:'+(pos?'var(--verde)':'var(--rojo)')+'">'+(pos?'+':'-')+fmtMoneda(m.monto).replace(/^\$\s/,'')+'</strong></div>';
-    }).join(''):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin movimientos en caja.</p>';
+    vt_gId('lista-caja').innerHTML=movCaja.length?(movCaja.map(movFilaHTML).join('')+
+      '<div class="btn-row" style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="verMovimientosCaja()">Ver todos los movimientos de caja ›</button></div>')
+      :'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin movimientos en caja.</p>';
 
     /* Cuentas por cobrar (pendientes, agrupadas por cliente) */
     var porCli={};
@@ -8797,10 +8798,11 @@ function renderFinanzas(){
        financiero/capital (préstamos y aportes: tampoco restan, no son gasto real).
        Solo del MES EN CURSO: desde el día siguiente al último cierre. */
     var desdeGastos = ultimoCierre ? diaSiguiente(ultimoCierre.fecha_hasta) : null;
-    var prodPorCat={}, opPorCat={}, finPorCat={}, totalProd=0, totalOp=0, totalFin=0;
-    movs.forEach(function(m){ if(m.tipo==='egreso'){
+    var prodPorCat={}, opPorCat={}, finPorCat={}, totalProd=0, totalOp=0, totalFin=0, totalPorRep=0, nPorRep=0;
+    movs.forEach(function(m){ if(m.tipo==='egreso'&&!esTraslado(m)){
       if(desdeGastos && (!m.fecha || m.fecha<desdeGastos))return; /* fuera del mes en curso */
       var cat=m.categoria||'Otros'; var monto=Number(m.monto)||0;
+      if(esPorReportar(m)){ totalPorRep+=monto; nPorRep++; return; }
       if(m.clase==='produccion'){ prodPorCat[cat]=(prodPorCat[cat]||0)+monto; totalProd+=monto; }
       else if(m.clase==='financiero'||m.clase==='capital'){ finPorCat[cat]=(finPorCat[cat]||0)+monto; totalFin+=monto; }
       else { opPorCat[cat]=(opPorCat[cat]||0)+monto; totalOp+=monto; }
@@ -8823,6 +8825,10 @@ function renderFinanzas(){
       '<div class="sec-label" style="margin-top:16px">🧾 Gastos operativos · '+fmtMoneda(totalOp)+'</div>'+
       '<p style="font-size:.74rem;color:var(--gris);margin-bottom:6px">Restan de la utilidad neta.</p>'+
       barras(opPorCat,totalOp,'var(--rojo)')+
+      (totalPorRep>0?(
+        '<div class="sec-label" style="margin-top:16px">🕓 Gastos por reportar · '+fmtMoneda(totalPorRep)+'</div>'+
+        '<p style="font-size:.74rem;color:var(--gris);margin-bottom:6px">'+nPorRep+' salida(s) de plata sin reportar en qué se gastó. No suman a inventario ni restan utilidad. Cuando sepas en qué fue, corrígela con ✏️.</p>'
+      ):'')+
       (totalFin>0?(
         '<div class="sec-label" style="margin-top:16px">💼 Préstamos y aportes · '+fmtMoneda(totalFin)+'</div>'+
         '<p style="font-size:.74rem;color:var(--gris);margin-bottom:6px">No son gasto: es plata que se espera de vuelta (préstamos) o que ya es tuya (capital). No restan utilidad.</p>'+
@@ -8854,10 +8860,10 @@ function verMovimientosBanco(banco){
       var pos=m.tipo==='ingreso'; var monto=Number(m.monto)||0;
       saldoCorr += (pos?1:-1)*monto;
       return '<div class="mini-row" style="padding:8px 0;border-bottom:1px solid var(--crema2)">'+
-        '<span>'+(pos?'⬆️':'⬇️')+' '+fmtFecha(m.fecha)+' · '+esc(m.ref||(pos?'Ingreso':'Salida'))+
+        '<span>'+(esTraslado(m)?'🔁':(pos?'⬆️':'⬇️'))+' '+fmtFecha(m.fecha)+' · '+esc(m.ref||(pos?'Ingreso':'Salida'))+
         (m.cliente?' ('+esc(m.cliente)+')':'')+(m.categoria?' · '+esc(m.categoria):'')+
-        '<br><span style="font-size:.72rem;color:var(--gris)">Saldo: '+fmtMoneda(saldoCorr)+'</span></span>'+
-        '<strong style="color:'+(pos?'var(--verde)':'var(--rojo)')+'">'+(pos?'+':'-')+fmtMoneda(monto).replace(/^\$\s/,'')+'</strong></div>';
+        '<br><span style="font-size:.72rem;color:var(--gris)">Saldo: '+fmtMoneda(saldoCorr)+'</span>'+movEditadoTag(m)+'</span>'+
+        '<span style="display:flex;gap:6px;align-items:center;white-space:nowrap"><strong style="color:'+(pos?'var(--verde)':'var(--rojo)')+'">'+(pos?'+':'-')+fmtMoneda(monto).replace(/^\$\s/,'')+'</strong>'+movBotonEditar(m)+'</span></div>';
     }).join('');
     if(!mvMes.length){ filasHTML='<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin movimientos en el mes en curso.</p>'; }
     abrirModal('<h3>🏦 '+esc(banco)+'</h3>'+
@@ -9064,7 +9070,7 @@ function renderGastos(){
     function enPeriodo(m){ if(periodo==='historico')return true; if(!desdeMes)return true; return m.fecha && m.fecha>=desdeMes; }
     /* solo egresos válidos (no huérfanos) dentro del periodo */
     var egresos=movs.filter(function(m){
-      if(m.tipo!=='egreso')return false;
+      if(m.tipo!=='egreso'||esTraslado(m))return false;
       if(m.facturaId&&!idsF[m.facturaId])return false;
       if(!enPeriodo(m))return false;
       if(filtro==='operativo')return m.clase!=='produccion';
@@ -9072,7 +9078,7 @@ function renderGastos(){
       return true;
     });
     var totalOp=0,totalProd=0;
-    movs.forEach(function(m){ if(m.tipo==='egreso'&&!(m.facturaId&&!idsF[m.facturaId])&&enPeriodo(m)){ if(m.clase==='produccion')totalProd+=(Number(m.monto)||0); else totalOp+=(Number(m.monto)||0); } });
+    movs.forEach(function(m){ if(m.tipo==='egreso'&&!esTraslado(m)&&!(m.facturaId&&!idsF[m.facturaId])&&enPeriodo(m)){ if(m.clase==='produccion')totalProd+=(Number(m.monto)||0); else totalOp+=(Number(m.monto)||0); } });
     var totalFiltrado=egresos.reduce(function(s,m){return s+(Number(m.monto)||0);},0);
     vt_gId('kpi-gastos').innerHTML=
       kpi(fmtMoneda(totalOp+totalProd),'Total salidas','destacado')+
@@ -9122,8 +9128,8 @@ function renderGastos(){
             var esProd=m.clase==='produccion';
             return '<div class="mini-row" style="padding:8px 0;border-bottom:1px solid var(--crema2)">'+
               '<span>'+fmtFecha(m.fecha)+' · '+esc(m.categoria||'')+' '+(esProd?'<span class="badge" style="background:#dce8f5;color:#1a4a7a">producción</span>':'<span class="badge" style="background:#fde0dc;color:#7a1010">operativo</span>')+
-              '<br><span style="font-size:.74rem;color:var(--gris)">'+esc(m.ref||'')+'</span></span>'+
-              '<strong style="color:var(--rojo)">'+fmtMoneda(m.monto)+'</strong></div>';
+              '<br><span style="font-size:.74rem;color:var(--gris)">'+esc(m.ref||'')+'</span>'+movEditadoTag(m)+'</span>'+
+              '<span style="display:flex;gap:6px;align-items:center"><strong style="color:var(--rojo)">'+fmtMoneda(m.monto)+'</strong>'+movBotonEditar(m)+'</span></div>';
           }).join('')+
           '<div class="mini-row" style="padding:9px 0;font-weight:700;border-top:2px solid var(--crema2)"><span>Subtotal '+esc(g.label)+' ('+g.movs.length+')</span>'+
           '<strong style="color:var(--rojo)">'+fmtMoneda(g.total)+'</strong></div>';
@@ -9252,7 +9258,7 @@ function confirmarIngreso(){
   var esPrestamo=(categoria==='Préstamo recibido');
   var clase=esSaldoInicial?'saldo_inicial':(esAporte?'capital':(esPrestamo?'financiero':'otro_ingreso'));
   var bm=(destino==='caja')?leerBilleteMoneda('in',monto):{billete:0,moneda:0};
-  var registro={id:uid(),cuenta:destino,tipo:'ingreso',clase:clase,categoria:categoria,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||categoria,cliente:null,billete:bm.billete,moneda:bm.moneda,ts:Date.now()};
+  var registro={id:uid(),cuenta:destino,tipo:'ingreso',clase:clase,categoria:categoria,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||categoria,cliente:null,billete:bm.billete,moneda:bm.moneda,manual:true,aparato:movAparato(),ts:Date.now()};
   dbPut(STORE_FINANZAS,registro).then(function(){
     if(!esPrestamo)return null;
     /* la deuda queda igual que una cuenta por pagar cualquiera: aparece en
@@ -9390,7 +9396,17 @@ function confirmarPagoCuenta(movId){
 var CAT_OPERATIVO=['Transporte / domicilios','Combustible / gasolina','Publicidad','Comisiones','Impuestos','Papelería / talonarios','Bolsas de venta','Imprevistos / reparaciones','Otros'];
 var PROD_PRODUCCION=['Arequipe','Obleas','Otro producto'];
 /* [RUBROS] listas base por clase; los nuevos se guardan en localStorage */
-var RUBROS_PROD_BASE=['Harina','Gas','Lecitina','Aditivos','Adhesivo','Icopor','Bolsa empaque','Insumos','Guantes','Cinta','Cajas','Agua','Luz','Arriendo','Mano de obra'];
+var RUBROS_PROD_BASE=['Harina','Gas','Lecitina','Aditivos','Adhesivo','Icopor','Bolsa empaque','Insumos','Guantes','Cinta','Cajas','Agua','Luz','Arriendo','Mano de obra','Gastos por reportar'];
+/* [29 sep 2026] «Gastos por reportar»: plata que salió para producción pero
+   no se sabe en qué (nadie reportó el gasto). Es clase 'produccion' (no
+   resta utilidad) pero NO es de un producto ni suma a inventario: solo
+   descuenta la plata de caja o del banco de donde salió. */
+var RUBRO_POR_REPORTAR='Gastos por reportar';
+/* [29 sep 2026] Traslado entre caja y bancos: dos movimientos enlazados
+   (sale de uno, entra al otro) con clase 'traslado'. No es gasto, ni
+   ingreso, ni toca la utilidad: se salta en todo cálculo de gastos. */
+function esTraslado(m){ return !!m && m.clase==='traslado'; }
+function esPorReportar(m){ return !!m && m.clase==='produccion' && (m.rubro===RUBRO_POR_REPORTAR||m.categoria===RUBRO_POR_REPORTAR); }
 var RUBROS_OP_BASE=['Gasolina','Transporte / domicilios','Publicidad','Comisiones','Impuestos','Papelería / talonarios','Bolsas de venta','Imprevistos / reparaciones','Otros'];
 function rubrosGuardados(clase){ try{ return JSON.parse(localStorage.getItem('facturaai_rubros_'+clase)||'[]'); }catch(e){ return []; } }
 function guardarRubroNuevo(clase,rubro){ var arr=rubrosGuardados(clase); if(arr.indexOf(rubro)<0){ arr.push(rubro); localStorage.setItem('facturaai_rubros_'+clase,JSON.stringify(arr)); } }
@@ -9412,7 +9428,11 @@ function onCambioClase(prefijo){
 function optsProductos(){ return PROD_PRODUCCION.map(function(p){return '<option value="'+esc(p)+'">'+esc(p)+'</option>';}).join('')+'<option value="__nuevo__">➕ Otro (escribir)</option>'; }
 function onCambioProd(prefijo){ var sel=vt_gId(prefijo+'-prod').value; vt_gId(prefijo+'-prod-nuevo-wrap').style.display=(sel==='__nuevo__')?'block':'none'; }
 function leerProducto(prefijo){ var sel=vt_gId(prefijo+'-prod').value; if(sel==='__nuevo__'){ return vt_gId(prefijo+'-prod-nuevo').value.trim()||'Otro producto'; } return sel; }
-function onCambioRubro(prefijo){ var sel=vt_gId(prefijo+'-rubro').value; var w=vt_gId(prefijo+'-rubro-nuevo-wrap'); if(w)w.style.display=(sel==='__nuevo__')?'block':'none'; }
+function onCambioRubro(prefijo){ var sel=vt_gId(prefijo+'-rubro').value; var w=vt_gId(prefijo+'-rubro-nuevo-wrap'); if(w)w.style.display=(sel==='__nuevo__')?'block':'none';
+  /* gastos por reportar no son de ningún producto */
+  var cl=vt_gId(prefijo+'-clase'), pw=vt_gId(prefijo+'-prod-wrap');
+  if(cl&&pw&&cl.value==='produccion') pw.style.display=(sel===RUBRO_POR_REPORTAR)?'none':'block';
+  var nota=vt_gId(prefijo+'-porrep-nota'); if(nota) nota.style.display=(cl&&cl.value==='produccion'&&sel===RUBRO_POR_REPORTAR)?'block':'none'; }
 function leerRubro(prefijo,clase){ var sel=vt_gId(prefijo+'-rubro').value; if(sel==='__nuevo__'){ var nuevo=vt_gId(prefijo+'-rubro-nuevo').value.trim()||'Otros'; guardarRubroNuevo(clase,nuevo); return nuevo; } return sel||'Otros'; }
 
 function bloqueClaseHTML(prefijo){
@@ -9422,13 +9442,16 @@ function bloqueClaseHTML(prefijo){
       '<div id="'+prefijo+'-prod-nuevo-wrap" style="display:none;margin-top:8px"><input type="text" id="'+prefijo+'-prod-nuevo" placeholder="Nombre del producto"></div></div>'+
     '<div style="margin-top:10px"><label>¿En qué se gastó? (rubro)</label>'+
       '<select id="'+prefijo+'-rubro" onchange="onCambioRubro(\''+prefijo+'\')">'+optsRubros('operativo')+'</select>'+
-      '<div id="'+prefijo+'-rubro-nuevo-wrap" style="display:none;margin-top:8px"><input type="text" id="'+prefijo+'-rubro-nuevo" placeholder="Nombre del rubro nuevo"></div></div>';
+      '<div id="'+prefijo+'-rubro-nuevo-wrap" style="display:none;margin-top:8px"><input type="text" id="'+prefijo+'-rubro-nuevo" placeholder="Nombre del rubro nuevo"></div></div>'+
+    '<div id="'+prefijo+'-porrep-nota" style="display:none;font-size:.74rem;color:var(--gris);margin-top:4px">🕓 Solo sale la plata. No suma a inventario ni resta utilidad.</div>';
 }
 /* devuelve {clase, categoria, rubro, producto} */
 function leerClasificacion(prefijo){
   var clase=vt_gId(prefijo+'-clase').value;
   var rubro=leerRubro(prefijo,clase);
-  if(clase==='produccion'){ var prod=leerProducto(prefijo); return {clase:'produccion', categoria:rubro, rubro:rubro, producto:prod}; }
+  if(clase==='produccion'){
+    if(rubro===RUBRO_POR_REPORTAR) return {clase:'produccion', categoria:rubro, rubro:rubro, producto:null};
+    var prod=leerProducto(prefijo); return {clase:'produccion', categoria:rubro, rubro:rubro, producto:prod}; }
   return {clase:'operativo', categoria:rubro, rubro:rubro, producto:null};
 }
 
@@ -9447,7 +9470,7 @@ function confirmarGasto(){
   var detalle=vt_gId('gc-concepto').value.trim();
   if(monto<=0){ toast('Monto inválido','err'); return; }
   var bm=leerBilleteMoneda('gc',monto);
-  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'caja',tipo:'egreso',clase:cl.clase,categoria:cl.categoria,rubro:cl.rubro,producto:cl.producto,monto:monto,fecha:hoyISO(),facturaId:null,banco:null,ref:detalle||cl.rubro,cliente:null,billete:bm.billete,moneda:bm.moneda,ts:Date.now()})
+  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'caja',tipo:'egreso',clase:cl.clase,categoria:cl.categoria,rubro:cl.rubro,producto:cl.producto,monto:monto,fecha:hoyISO(),facturaId:null,banco:null,ref:detalle||cl.rubro,cliente:null,billete:bm.billete,moneda:bm.moneda,manual:true,aparato:movAparato(),ts:Date.now()})
     .then(function(){ toast('Salida registrada','ok'); cerrarModal(); refrescarTodo(); });
 }
 
@@ -9468,8 +9491,310 @@ function confirmarGastoBanco(){
   var detalle=vt_gId('gb-concepto').value.trim();
   if(!banco||banco==='Sin especificar'){ toast('Elige un banco','err'); return; }
   if(monto<=0){ toast('Monto inválido','err'); return; }
-  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'bancos',tipo:'egreso',clase:cl.clase,categoria:cl.categoria,rubro:cl.rubro,producto:cl.producto,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||cl.rubro,cliente:null,ts:Date.now()})
+  dbPut(STORE_FINANZAS,{id:uid(),cuenta:'bancos',tipo:'egreso',clase:cl.clase,categoria:cl.categoria,rubro:cl.rubro,producto:cl.producto,monto:monto,fecha:hoyISO(),facturaId:null,banco:banco,ref:detalle||cl.rubro,cliente:null,manual:true,aparato:movAparato(),ts:Date.now()})
     .then(function(){ toast('Salida de banco registrada','ok'); cerrarModal(); refrescarTodo(); });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   [29 sep 2026] EDITAR MOVIMIENTOS DE CAJA/BANCOS + TRASLADOS
+   Antes, un ingreso o una salida mal anotados solo se arreglaban
+   inventando movimientos de corrección. Ahora el ✏️ corrige el MISMO
+   movimiento (misma id) y le deja la marca «editado» con lo que tenía
+   antes (m.historial). m.editada = marca de tiempo de la última edición:
+   con ella DMSync reemplaza la versión vieja en el otro celular.
+   Qué se puede editar:
+     - lo anotado a mano: ingreso (no venta), salida de caja o banco, traslado.
+     - lo que viene de otra parte (remisión, compra, nómina, préstamo, pago
+       de una cuenta) NO: se corrige desde su origen para no descuadrarlo.
+     - el encargado: solo sus propios gastos de hoy.
+   ═══════════════════════════════════════════════════════════════════════ */
+function movAparato(){ try{ return localStorage.getItem('dm_aparato')||''; }catch(e){ return ''; } }
+function movEsEncargado(){ try{ var p=window.DM_PERFIL; return !!(p&&p.nombre==='encargado'); }catch(e){ return false; } }
+/* devuelve el motivo por el que NO se edita aquí, o null si se puede */
+function movVinculo(m){
+  if(!m)return 'Ese movimiento ya no existe.';
+  if(m.cuenta!=='caja'&&m.cuenta!=='bancos')return 'Solo se editan movimientos de caja o bancos.';
+  if(esTraslado(m))return null;
+  var ref=String(m.ref||'');
+  if(m.facturaId)return 'Viene de una remisión: corrígelo editando la remisión.';
+  if(m.compraId||/^Compra de /.test(ref))return 'Viene de una compra: corrígela desde Bodega / Inventario.';
+  if(m.saldaId||m.origenId||/^(Pago a |Abono a |Pago crédito|Abono crédito)/.test(ref))return 'Es el pago de una cuenta por cobrar o por pagar: se corrige desde esa cuenta.';
+  if(/^Nómina /.test(ref)||m.categoria==='Mano de obra')return 'Viene del pago de nómina.';
+  if(m.clase==='financiero')return 'Es un préstamo (a un empleado o recibido): se corrige desde Préstamos o Cuentas por pagar.';
+  return null;
+}
+function movPuedeEditar(m){
+  if(movVinculo(m))return false;
+  if(movEsEncargado())return m.tipo==='egreso' && !esTraslado(m) && m.fecha===hoyISO() && !!m.aparato && m.aparato===movAparato();
+  return true;
+}
+function movBotonEditar(m){
+  if(!m||(m.cuenta!=='caja'&&m.cuenta!=='bancos'))return '';
+  if(movPuedeEditar(m))return '<button class="btn btn-ghost btn-sm mov-edit" style="padding:2px 7px" title="Editar" onclick="event.stopPropagation();abrirEditarMov(\''+m.id+'\')">✏️</button>';
+  if(movEsEncargado())return '';
+  return '<button class="btn btn-ghost btn-sm" style="padding:2px 7px;opacity:.55" title="Se corrige desde su origen" onclick="event.stopPropagation();toast(\''+String(movVinculo(m)||'').replace(/'/g,"\\'")+'\',\'warn\')">🔗</button>';
+}
+function movFechaHora(ts){ var d=new Date(Number(ts)||0); return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function movEditadoTag(m){
+  if(!m||!m.editada)return '';
+  return '<br><span class="mov-editado" style="font-size:.7rem;color:var(--caramelo);cursor:pointer;text-decoration:underline dotted" onclick="event.stopPropagation();verHistorialMov(\''+m.id+'\')">✏️ editado el '+movFechaHora(m.editada)+' · ver antes</span>';
+}
+/* lo que se guarda como «antes» en cada edición */
+function movFoto(m){
+  var f={}; ['monto','fecha','cuenta','banco','tipo','clase','categoria','rubro','producto','ref','billete','moneda'].forEach(function(k){ f[k]=(m[k]===undefined?null:m[k]); });
+  return f;
+}
+function movDescribir(f){
+  var donde=f.cuenta==='bancos'?('🏦 '+(f.banco||'Banco')):'💵 Caja';
+  var clase=esTraslado(f)?'traslado':(f.clase==='produccion'?'producción':(f.clase==='operativo'?'operativo':(f.clase||'')));
+  return fmtFecha(f.fecha)+' · '+donde+' · '+fmtMoneda(f.monto)+'<br><span style="font-size:.74rem;color:var(--gris)">'+
+    esc(f.categoria||'')+(clase?' · '+esc(clase):'')+(f.producto?' · '+esc(f.producto):'')+(f.ref?' · '+esc(f.ref):'')+'</span>';
+}
+function verHistorialMov(id){
+  dbGet(STORE_FINANZAS,id).then(function(m){
+    if(!m)return;
+    var h=(m.historial||[]).slice().reverse();
+    abrirModal('<h3>✏️ Historial del movimiento</h3>'+
+      '<div class="sec-label">Cómo está ahora</div><div class="mini-row" style="padding:7px 0"><span>'+movDescribir(m)+'</span></div>'+
+      h.map(function(x){ return '<div class="sec-label" style="margin-top:10px">Antes de la edición del '+movFechaHora(x.ts)+(x.aparato?' ('+esc(x.aparato)+')':'')+'</div>'+
+        '<div class="mini-row" style="padding:7px 0;border-bottom:1px solid var(--crema2)"><span>'+movDescribir(x.antes||{})+'</span></div>'; }).join('')+
+      '<div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cerrar</button></div>');
+  });
+}
+/* opciones de «dónde»: caja o cada banco */
+function movOptsCuenta(sel,conNuevo){
+  var o='<option value="caja"'+(sel==='caja'?' selected':'')+'>💵 Caja (efectivo)</option>';
+  listaBancos().forEach(function(b){ var v='banco:'+b; o+='<option value="'+esc(v)+'"'+(sel===v?' selected':'')+'>🏦 '+esc(b)+'</option>'; });
+  if(conNuevo)o+='<option value="__nuevo__">➕ Agregar banco nuevo</option>';
+  return o;
+}
+function movSelCuentaHTML(pre,sel){
+  return '<select id="'+pre+'-donde" onchange="movOnDonde(\''+pre+'\')">'+movOptsCuenta(sel,true)+'</select>'+
+    '<div id="'+pre+'-donde-nuevo-wrap" style="display:none;margin-top:8px"><input type="text" id="'+pre+'-donde-nuevo" placeholder="Nombre del banco nuevo"></div>';
+}
+function movOnDonde(pre){
+  var v=vt_gId(pre+'-donde').value, w=vt_gId(pre+'-donde-nuevo-wrap'); if(w)w.style.display=(v==='__nuevo__')?'block':'none';
+  var bm=vt_gId(pre+'-bm-wrap'); if(bm)bm.style.display=(v==='caja')?'block':'none';
+}
+/* {cuenta, banco} a partir del selector */
+function movLeerDonde(pre){
+  var v=vt_gId(pre+'-donde').value;
+  if(v==='caja')return {cuenta:'caja',banco:null};
+  if(v==='__nuevo__'){ var n=(vt_gId(pre+'-donde-nuevo').value||'').trim(); if(!n)return null; guardarBancoNuevo(n); return {cuenta:'bancos',banco:n}; }
+  return {cuenta:'bancos',banco:v.replace(/^banco:/,'')};
+}
+function movValorDonde(m){ return m.cuenta==='caja'?'caja':('banco:'+(m.banco||'Sin especificar')); }
+function movNombreDonde(d){ return d.cuenta==='caja'?'Caja':(d.banco||'Banco'); }
+/* avisos de mes cerrado / arqueo de un día pasado */
+function movAvisoFecha(fechas){
+  return obtenerUltimoCierre().then(function(c){
+    var av=[]; var hoy=hoyISO();
+    var cerrada=fechas.filter(function(f){ return c && f && f<=c.fecha_hasta; });
+    if(cerrada.length)av.push('⚠️ Toca un mes ya cerrado ('+esc(nombreMes(c.fecha_hasta))+'). Al guardar, ese cierre queda desactualizado: vuelve a cerrarlo en 📅 Cierres.');
+    if(fechas.some(function(f){ return f && f<hoy; }))av.push('ℹ️ Cambia el arqueo de caja de un día anterior.');
+    return av;
+  }).catch(function(){ return []; });
+}
+function movPintarAviso(pre,fechaOriginal){
+  var inp=vt_gId(pre+'-fecha'); var fs=[fechaOriginal,inp&&inp.value].filter(Boolean);
+  movAvisoFecha(fs).then(function(av){ var el=vt_gId(pre+'-aviso'); if(el)el.innerHTML=av.map(function(t){return '<div style="margin-top:4px">'+t+'</div>';}).join(''); });
+}
+function movSetSelect(id,val){
+  var el=vt_gId(id); if(!el||val==null||val==='')return;
+  var ok=Array.prototype.some.call(el.options,function(o){ return o.value===val; });
+  if(!ok){ var op=document.createElement('option'); op.value=val; op.textContent=val; el.insertBefore(op,el.lastElementChild); }
+  el.value=val;
+}
+function movBMHTML(pre,m,visible){
+  return bloqueBilleteMonedaHTML(pre).replace('id="'+pre+'-bm-wrap" style="margin-top:10px"','id="'+pre+'-bm-wrap" style="margin-top:10px;display:'+(visible?'block':'none')+'"');
+}
+function movLlenarBM(pre,m){
+  var mon=Number(m.moneda)||0;
+  if(mon>0 && vt_gId(pre+'-bm-on')){ vt_gId(pre+'-bm-on').checked=true; if(typeof onToggleBM==='function')onToggleBM(pre);
+    vt_gId(pre+'-billete').value=Number(m.billete)||0; vt_gId(pre+'-moneda').value=mon; onCalcBM(pre); }
+}
+
+function abrirEditarMov(id){
+  dbGet(STORE_FINANZAS,id).then(function(m){
+    if(!m){ toast('Ese movimiento ya no existe','err'); return; }
+    if(!movPuedeEditar(m)){ toast(movVinculo(m)||'Este movimiento no se puede editar desde este celular','warn'); return; }
+    if(esTraslado(m)){ abrirTraslado(m.trasladoId||m.id); return; }
+    var pre='em'; var esIng=(m.tipo==='ingreso');
+    var refAuto=(!m.ref||m.ref===m.rubro||m.ref===m.categoria);
+    var cuerpo;
+    if(esIng){
+      var cats=CAT_INGRESO.filter(function(c){ return c!=='Préstamo recibido'; });
+      if(m.categoria && cats.indexOf(m.categoria)<0)cats.push(m.categoria);
+      cuerpo='<div><label>Tipo de ingreso</label><select id="em-cat">'+cats.map(function(c){ return '<option value="'+esc(c)+'"'+(c===m.categoria?' selected':'')+'>'+esc(c)+'</option>'; }).join('')+'</select></div>';
+    } else {
+      cuerpo=bloqueClaseHTML(pre);
+    }
+    abrirModal('<h3>✏️ Editar '+(esIng?'ingreso':'salida')+'</h3>'+
+      '<p style="font-size:.78rem;color:var(--gris);margin-bottom:10px">Corrige este mismo movimiento. No hace falta hacer movimientos de corrección: queda marcado como editado y se guarda cómo estaba antes.</p>'+
+      cuerpo+
+      '<div style="margin-top:10px"><label>'+(esIng?'¿A dónde entró?':'¿De dónde salió?')+'</label>'+movSelCuentaHTML(pre,movValorDonde(m))+'</div>'+
+      '<div class="fg c2" style="margin-top:10px"><div><label>Monto</label><input type="number" id="em-monto" value="'+(Number(m.monto)||0)+'" oninput="onCalcBM(\'em\')"></div>'+
+      '<div><label>Fecha</label><input type="date" id="em-fecha" value="'+esc(m.fecha||hoyISO())+'" onchange="movPintarAviso(\'em\',\''+esc(m.fecha||'')+'\')"></div></div>'+
+      '<div style="margin-top:10px"><label>Detalle (opcional)</label><input type="text" id="em-detalle" value="'+(refAuto?'':esc(m.ref))+'"></div>'+
+      movBMHTML(pre,m,m.cuenta==='caja')+
+      '<div id="em-aviso" style="font-size:.76rem;color:var(--rojo);margin-top:8px"></div>'+
+      '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="guardarEdicionMov(\''+m.id+'\')">Guardar cambios</button>'+
+      (movEsEncargado()?'':'<button class="btn btn-danger btn-sm" onclick="eliminarMov(\''+m.id+'\')">🗑 Eliminar</button>')+
+      '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>');
+    if(!esIng){
+      var clase=(m.clase==='produccion')?'produccion':'operativo';
+      vt_gId('em-clase').value=clase; onCambioClase('em');
+      movSetSelect('em-rubro',m.rubro||m.categoria); onCambioRubro('em');
+      if(clase==='produccion' && m.producto)movSetSelect('em-prod',m.producto);
+    }
+    movLlenarBM(pre,m);
+    movPintarAviso('em',m.fecha||'');
+  });
+}
+function guardarEdicionMov(id){
+  dbGet(STORE_FINANZAS,id).then(function(m){
+    if(!m||!movPuedeEditar(m)){ toast('No se pudo editar','err'); return; }
+    var monto=Number(vt_gId('em-monto').value)||0;
+    if(monto<=0){ toast('Monto inválido','err'); return; }
+    var fecha=vt_gId('em-fecha').value||m.fecha||hoyISO();
+    if(movEsEncargado() && fecha!==hoyISO()){ toast('Desde este celular solo se corrigen gastos de hoy','err'); return; }
+    var d=movLeerDonde('em'); if(!d){ toast('Escribe el nombre del banco','err'); return; }
+    var detalle=(vt_gId('em-detalle').value||'').trim();
+    var n=JSON.parse(JSON.stringify(m));
+    n.historial=(m.historial||[]).concat([{ts:Date.now(),aparato:movAparato(),antes:movFoto(m)}]);
+    n.editada=Date.now();
+    n.monto=monto; n.fecha=fecha; n.cuenta=d.cuenta; n.banco=d.banco;
+    if(m.tipo==='ingreso'){
+      var cat=vt_gId('em-cat').value;
+      n.categoria=cat;
+      /* misma regla que confirmarIngreso */
+      n.clase=(cat==='Saldo inicial')?'saldo_inicial':((cat==='Aporte del dueño')?'capital':'otro_ingreso');
+      n.ref=detalle||cat;
+    } else {
+      var cl=leerClasificacion('em');
+      n.clase=cl.clase; n.categoria=cl.categoria; n.rubro=cl.rubro; n.producto=cl.producto;
+      n.ref=detalle||cl.rubro;
+    }
+    if(d.cuenta==='caja'){ var bm=leerBilleteMoneda('em',monto); n.billete=bm.billete; n.moneda=bm.moneda; }
+    else { n.billete=0; n.moneda=0; }
+    return dbPut(STORE_FINANZAS,n).then(function(){ toast('Movimiento corregido','ok'); cerrarModal(); refrescarTodo(); });
+  });
+}
+/* eliminar un movimiento anotado a mano (con su pareja si es traslado).
+   Deja lápida para que también se quite en el otro celular. */
+function eliminarMov(id){
+  dbGet(STORE_FINANZAS,id).then(function(m){
+    if(!m||!movPuedeEditar(m)||movEsEncargado()){ toast('No se puede eliminar','err'); return; }
+    var p=esTraslado(m)?movParTraslado(m.trasladoId||m.id):Promise.resolve([m]);
+    return p.then(function(lista){
+      if(!confirm('¿Eliminar '+(lista.length>1?'este traslado (sus dos partes)':'este movimiento')+' de '+fmtMoneda(m.monto)+'? Los saldos se recalculan solos.'))return;
+      return Promise.all(lista.map(function(x){
+        try{ if(window.DMSync&&DMSync.marcarBorradoIDB)DMSync.marcarBorradoIDB('facturaai_finanzas',x.id); }catch(e){}
+        return dbDel(STORE_FINANZAS,x.id);
+      })).then(function(){ toast('Movimiento eliminado','ok'); cerrarModal(); refrescarTodo(); });
+    });
+  });
+}
+
+/* ── Traslados ─────────────────────────────────────────────────────────── */
+function movParTraslado(trasladoId){
+  return dbGetAll(STORE_FINANZAS).then(function(all){
+    return all.filter(function(x){ return esTraslado(x) && (x.trasladoId===trasladoId||x.id===trasladoId); });
+  });
+}
+function abrirTraslado(trasladoId){
+  var p=trasladoId?movParTraslado(trasladoId):Promise.resolve([]);
+  p.then(function(par){
+    var sal=par.filter(function(x){return x.tipo==='egreso';})[0]||null;
+    var ent=par.filter(function(x){return x.tipo==='ingreso';})[0]||null;
+    var editando=!!(sal||ent);
+    var base=sal||ent||{};
+    var refAuto=!base.ref||/^Traslado (a|desde) /.test(base.ref);
+    abrirModal('<h3>🔁 '+(editando?'Editar traslado':'Traslado entre caja y bancos')+'</h3>'+
+      '<p style="font-size:.78rem;color:var(--gris);margin-bottom:10px">Mueve plata de un lado a otro (ej: consignar efectivo, sacar del banco). No es gasto ni ingreso: no toca la utilidad.</p>'+
+      '<div><label>Sale de</label><select id="tr-origen">'+movOptsCuenta(sal?movValorDonde(sal):'caja',false)+'</select></div>'+
+      '<div style="margin-top:10px"><label>Entra a</label>'+movSelCuentaHTML('tr',ent?movValorDonde(ent):(listaBancos()[0]?'banco:'+listaBancos()[0]:'caja'))+'</div>'+
+      '<div class="fg c2" style="margin-top:10px"><div><label>Monto</label><input type="number" id="tr-monto" placeholder="0" value="'+(editando?(Number(base.monto)||0):'')+'"></div>'+
+      '<div><label>Fecha</label><input type="date" id="tr-fecha" value="'+esc(base.fecha||hoyISO())+'" onchange="movPintarAviso(\'tr\',\''+esc(base.fecha||'')+'\')"></div></div>'+
+      '<div style="margin-top:10px"><label>Detalle (opcional)</label><input type="text" id="tr-detalle" placeholder="Ej: consignación del día" value="'+(refAuto?'':esc(base.ref))+'"></div>'+
+      '<div id="tr-aviso" style="font-size:.76rem;color:var(--rojo);margin-top:8px"></div>'+
+      '<div class="btn-row"><button class="btn btn-success btn-sm" onclick="confirmarTraslado(\''+(editando?esc(base.trasladoId||base.id):'')+'\')">'+(editando?'Guardar cambios':'Registrar traslado')+'</button>'+
+      (editando?'<button class="btn btn-danger btn-sm" onclick="eliminarMov(\''+esc(base.id)+'\')">🗑 Eliminar</button>':'')+
+      '<button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cancelar</button></div>');
+    if(editando)movPintarAviso('tr',base.fecha||'');
+  });
+}
+function confirmarTraslado(trasladoId){
+  var vo=vt_gId('tr-origen').value;
+  var o=(vo==='caja')?{cuenta:'caja',banco:null}:{cuenta:'bancos',banco:vo.replace(/^banco:/,'')};
+  var d=movLeerDonde('tr'); if(!d){ toast('Escribe el nombre del banco','err'); return; }
+  var monto=Number(vt_gId('tr-monto').value)||0;
+  var fecha=vt_gId('tr-fecha').value||hoyISO();
+  var detalle=(vt_gId('tr-detalle').value||'').trim();
+  if(monto<=0){ toast('Monto inválido','err'); return; }
+  if(o.cuenta===d.cuenta && (o.banco||'')===(d.banco||'')){ toast('El origen y el destino son el mismo','err'); return; }
+  var p=trasladoId?movParTraslado(trasladoId):Promise.resolve([]);
+  p.then(function(par){
+    var sal=par.filter(function(x){return x.tipo==='egreso';})[0]||null;
+    var ent=par.filter(function(x){return x.tipo==='ingreso';})[0]||null;
+    var tid=trasladoId||uid(); var ahora=Date.now(); var ap=movAparato();
+    function armar(viejo,tipo,donde,ref){
+      var n=viejo?JSON.parse(JSON.stringify(viejo)):{id:uid(),ts:ahora,manual:true,aparato:ap,facturaId:null,cliente:null};
+      if(viejo){ n.historial=(viejo.historial||[]).concat([{ts:ahora,aparato:ap,antes:movFoto(viejo)}]); n.editada=ahora; }
+      n.cuenta=donde.cuenta; n.banco=donde.banco; n.tipo=tipo; n.clase='traslado'; n.categoria='Traslado'; n.rubro='Traslado'; n.producto=null;
+      n.monto=monto; n.fecha=fecha; n.ref=detalle||ref; n.trasladoId=tid;
+      n.billete=(donde.cuenta==='caja')?monto:0; n.moneda=0;
+      return n;
+    }
+    var nSal=armar(sal,'egreso',o,'Traslado a '+movNombreDonde(d));
+    var nEnt=armar(ent,'ingreso',d,'Traslado desde '+movNombreDonde(o));
+    return Promise.all([dbPut(STORE_FINANZAS,nSal),dbPut(STORE_FINANZAS,nEnt)]).then(function(){
+      toast(trasladoId?'Traslado corregido':'Traslado registrado','ok'); cerrarModal(); refrescarTodo();
+    });
+  });
+}
+
+/* ── Todos los movimientos de caja (con filtro de fechas) ─────────────── */
+function verMovimientosCaja(){
+  obtenerUltimoCierre().then(function(c){
+    var desde=c?diaSiguiente(c.fecha_hasta):hoyISO().slice(0,8)+'01';
+    abrirModal('<h3>💵 Movimientos de caja</h3>'+
+      '<div class="fg c2"><div><label>Desde</label><input type="date" id="vc-desde" value="'+desde+'" onchange="pintarMovimientosCaja()"></div>'+
+      '<div><label>Hasta</label><input type="date" id="vc-hasta" value="'+hoyISO()+'" onchange="pintarMovimientosCaja()"></div></div>'+
+      '<div id="vc-lista" style="margin-top:10px"></div>'+
+      '<div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="cerrarModal()">Cerrar</button></div>');
+    pintarMovimientosCaja();
+  });
+}
+function pintarMovimientosCaja(){
+  var desde=(vt_gId('vc-desde')||{}).value||null, hasta=(vt_gId('vc-hasta')||{}).value||null;
+  Promise.all([dbGetAll(STORE_FINANZAS),dbGetAll(STORE_FACTURAS)]).then(function(r){
+    var idsF={}; r[1].forEach(function(f){ idsF[f.id]=true; });
+    var lista=r[0].filter(function(m){ return m.cuenta==='caja' && !(m.facturaId&&!idsF[m.facturaId]) && enRango(m.fecha,desde,hasta); })
+      .sort(function(a,b){ var fa=(a.fecha||'')+String(a.ts||''), fb=(b.fecha||'')+String(b.ts||''); return fa<fb?1:(fa>fb?-1:0); });
+    var el=vt_gId('vc-lista'); if(!el)return;
+    el.innerHTML=lista.length?lista.map(movFilaHTML).join(''):'<p style="color:var(--gris);font-size:.84rem;text-align:center;padding:10px">Sin movimientos en esas fechas.</p>';
+  });
+}
+/* una fila de movimiento con ✏️ y marca de editado */
+function movFilaHTML(m){
+  var pos=m.tipo==='ingreso';
+  return '<div class="mini-row" style="padding:7px 0;border-bottom:1px solid var(--crema2)">'+
+    '<span>'+(esTraslado(m)?'🔁':(pos?'⬆️':'⬇️'))+' '+fmtFecha(m.fecha)+' · '+esc(m.ref||'')+(m.cliente?' ('+esc(m.cliente)+')':'')+
+    (m.categoria&&m.categoria!==m.ref?'<br><span style="font-size:.72rem;color:var(--gris)">'+esc(m.categoria)+'</span>':'')+movEditadoTag(m)+'</span>'+
+    '<span style="display:flex;gap:6px;align-items:center;white-space:nowrap"><strong style="color:'+(pos?'var(--verde)':'var(--rojo)')+'">'+(pos?'+':'-')+fmtMoneda(m.monto).replace(/^\$\s/,'')+'</strong>'+movBotonEditar(m)+'</span></div>';
+}
+/* encargado: sus gastos de hoy, con ✏️, dentro de la tarjeta «Anotar un gasto» */
+function pintarMisGastosHoy(){
+  var card=vt_gId('card-anotar-gasto'); if(!card||typeof dbGetAll!=='function')return;
+  var box=vt_gId('mis-gastos-hoy');
+  if(!box){ box=document.createElement('div'); box.id='mis-gastos-hoy'; box.style.marginTop='10px'; card.appendChild(box); }
+  var ap=movAparato(), hoy=hoyISO();
+  dbGetAll(STORE_FINANZAS).then(function(all){
+    var mios=all.filter(function(m){ return m.tipo==='egreso' && (m.cuenta==='caja'||m.cuenta==='bancos') && m.fecha===hoy && m.manual && m.aparato===ap && !esTraslado(m); })
+      .sort(function(a,b){ return (b.ts||0)-(a.ts||0); });
+    box.innerHTML=mios.length?('<div class="sec-label">Anotados hoy desde este celular</div>'+mios.map(movFilaHTML).join('')):'';
+  });
 }
 
 /* [FINANZAS] Exportar movimientos a CSV */
@@ -9635,7 +9960,7 @@ function renderCaja(){
         var bm=tieneBM?'<br><span style="font-size:.72rem;color:var(--gris)">💵 '+fmtMoneda(a.bilDe(m))+' · 🪙 '+fmtMoneda(a.monDe(m))+'</span>':'';
         return '<div class="mini-row" style="padding:8px 0;border-bottom:1px solid var(--crema2)">'+
           '<span>⬇️ '+esc(m.ref||'Salida')+'<br><span style="font-size:.74rem;color:var(--gris)">'+esc(m.categoria||'Sin rubro')+
-          (m.clase==='produccion'?' · producción':' · operativo')+'</span>'+bm+'</span>'+
+          (esTraslado(m)?' · traslado':(m.clase==='produccion'?' · producción':' · operativo'))+'</span>'+bm+'</span>'+
           '<strong style="color:var(--rojo)">'+fmtMoneda(m.monto)+'</strong></div>';
       }).join('')+
       '<div class="mini-row" style="padding:11px 0;font-weight:700;border-top:2px solid var(--crema2)"><span>Total gastos ('+a.gastos.length+')</span>'+
@@ -9845,6 +10170,7 @@ function calcularPeriodo(desde,hasta){
        el Balance (Resumen → Activo/Pasivo/Patrimonio) pueda mostrarlos. */
     var gastosProd={}, gastosOp={}, totalProd=0, totalOp=0, ingresosNoVenta=0, totalFinanciero=0, totalCapital=0;
     finPeriodo.forEach(function(m){
+      if(esTraslado(m))return; /* mover plata entre caja y bancos no es gasto ni ingreso */
       if(m.clase==='financiero'){ totalFinanciero+=(m.tipo==='ingreso'?1:-1)*(Number(m.monto)||0); return; }
       if(m.clase==='capital'){ totalCapital+=(m.tipo==='ingreso'?1:-1)*(Number(m.monto)||0); return; }
       if(m.tipo==='egreso'){
@@ -13818,13 +14144,17 @@ var DMSync = (function () {
        a meter. El stock no se toca aquí: los movimientos de deshacer ya
        viajan por su cuenta. */
     { clave: 'dm_borrados',             llave: function (r) { return 'X' + r.k; },
-      area: 'registros borrados' }
+      area: 'registros borrados' },
+    /* [29 sep 2026] lista de proveedores (DMProveedores) */
+    { clave: 'dm_proveedores',          llave: function (r) { return 'PV' + r.id; },
+      area: 'proveedores' }
   ];
 
   /* Listas a las que aplican las lápidas, con la misma llave de arriba. */
   var BORRABLES = [
     { clave: 'obleas_turnos', llave: function (r) { return 'T' + r.id; } },
-    { clave: 'dm_ar_regs',    llave: function (r) { return 'L' + r.id; } }
+    { clave: 'dm_ar_regs',    llave: function (r) { return 'L' + r.id; } },
+    { clave: 'dm_proveedores', llave: function (r) { return 'PV' + r.id; } }
   ];
 
   /* Se llama al borrar (o al reemplazar al corregir) un registro. */
@@ -14190,6 +14520,26 @@ var DMSync = (function () {
             actual[s].forEach(function (r) { vistos[r.id] = r; });
             /* [28 sep 2026] Remisión EDITADA en el otro celular (misma id,
                marca «editada» más nueva): se reemplaza la de aquí. */
+            /* [29 sep 2026] lo mismo para un movimiento de caja/bancos editado
+               con ✏️ (ver abrirEditarMov en ventas.html) */
+            if (s === 'facturaai_finanzas') {
+              var movsEd = 0;
+              /* si llegan varias versiones del mismo movimiento, vale la más nueva */
+              var mejorV = {};
+              (entra[s] || []).forEach(function (r) {
+                if (!r || !r.id) return;
+                var b = mejorV[r.id]; if (!b || num(r.editada) > num(b.editada)) mejorV[r.id] = r;
+              });
+              entra[s] = (entra[s] || []).filter(function (r) { return !r || !r.id || mejorV[r.id] === r; });
+              (entra[s] || []).forEach(function (r) {
+                var mio = r && vistos[r.id];
+                if (!mio || num(r.editada) <= num(mio.editada)) return;
+                tx.objectStore(s).put(r);
+                actual[s] = actual[s].map(function (x) { return x.id === r.id ? r : x; });
+                vistos[r.id] = r; movsEd++;
+              });
+              if (movsEd) informe.push(movsEd + ' movimiento(s) de plata corregido(s) en el otro celular');
+            }
             if (s === 'facturaai_facturas') {
               var editadas = 0;
               (entra[s] || []).forEach(function (r) {
@@ -14618,6 +14968,8 @@ var DMSync = (function () {
     /* remisión editada: llave nueva para que la sincronización automática
        la vuelva a mandar (ver unirIDB, «editada») */
     if (store === 'facturaai_facturas' && r.id && r.editada) return r.id + '@' + r.editada;
+    /* [29 sep 2026] movimiento de caja/bancos editado (✏️): igual que la remisión */
+    if (store === 'facturaai_finanzas' && r.id && r.editada) return r.id + '@' + r.editada;
     if (esHechoIDB(store)) return r.id || null;
     var h = null;
     LS_HECHOS.forEach(function (x) { if (x.clave === store) h = x; });
@@ -17406,6 +17758,303 @@ var DMSituacion = (function () {
 
 </script>
 <script>
+/* ===== LISTA DE PROVEEDORES ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMProveedores — lista de proveedores [29 sep 2026]
+
+   Antes el proveedor se escribía a mano en cada compra y quedaba como se
+   escribiera: «Distribuidora La 14», «distribuidora la14», «Distri la 14»…
+   y así no se podía saber cuánto se le compra ni cuánto se le debe.
+
+   Ahora hay una lista (`dm_proveedores`, viaja entre los dos celulares como
+   cualquier hecho; borrar o renombrar deja lápida en `dm_borrados`).
+   Cada campo de proveedor de la app (compra en Bodega, entrada de stock,
+   cuenta por pagar, compra de insumos de Arequipe):
+     - sugiere los proveedores guardados mientras se escribe;
+     - si lo escrito es el mismo nombre con otras mayúsculas, tildes o
+       espacios, lo cambia solo por el nombre guardado;
+     - si se parece a uno guardado, pregunta «¿Es X?»;
+     - si es nuevo, lo agrega a la lista.
+   La lista se administra en ⚙️ Configuración → 🏷️ Proveedores.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMProveedores = (function () {
+  'use strict';
+
+  var K = 'dm_proveedores';
+  var K_SEMILLA = 'dm_prov_semilla_v1';
+  var LISTA_ID = 'dm-prov-lista';
+  /* ids de los campos de proveedor (el de Arequipe llega con prefijo) */
+  var CAMPOS = /(^|-)inv-prov$|^dmb-prov$|^es-prov$|^cp-proveedor$/;
+
+  function leer() {
+    try { var a = JSON.parse(localStorage.getItem(K) || '[]'); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function escribir(a) { try { localStorage.setItem(K, JSON.stringify(a)); } catch (e) {} }
+  function borrados() {
+    var m = {};
+    try {
+      (JSON.parse(localStorage.getItem('dm_borrados') || '[]') || []).forEach(function (r) {
+        if (r && r.k) m[r.k] = true;
+      });
+    } catch (e) {}
+    return m;
+  }
+  function esc6(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* «Distribuidora  La-14.» → «distribuidora la 14» */
+  function clave(n) {
+    return String(n || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[.,;:'"´`\-_/]+/g, ' ')
+      .replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  /* proveedores vivos (sin los borrados), sin repetidos, en orden alfabético */
+  function lista() {
+    var muertos = borrados(), vistos = {}, out = [];
+    leer().forEach(function (p) {
+      if (!p || !p.id || !p.nombre || muertos['PV' + p.id]) return;
+      var k = clave(p.nombre);
+      if (!k || vistos[k]) return;
+      vistos[k] = true; out.push(p);
+    });
+    return out.sort(function (a, b) { return a.nombre.localeCompare(b.nombre, 'es'); });
+  }
+  function nombres() { return lista().map(function (p) { return p.nombre; }); }
+
+  function buscarExacto(n) {
+    var k = clave(n); if (!k) return null;
+    var r = null; lista().forEach(function (p) { if (!r && clave(p.nombre) === k) r = p; });
+    return r;
+  }
+  function distancia(a, b) {
+    if (a === b) return 0;
+    var m = a.length, n = b.length, d = [], i, j;
+    for (i = 0; i <= m; i++) d[i] = [i];
+    for (j = 0; j <= n; j++) d[0][j] = j;
+    for (i = 1; i <= m; i++) for (j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return d[m][n];
+  }
+  /* uno guardado que se parezca (errores de tecleo, o escrito a medias) */
+  function parecido(n) {
+    var k = clave(n); if (k.length < 3) return null;
+    var mejor = null, dMejor = 99;
+    lista().forEach(function (p) {
+      var kp = clave(p.nombre);
+      var d = distancia(k, kp);
+      var tope = Math.max(1, Math.floor(Math.max(k.length, kp.length) / 5));
+      var contiene = (k.length >= 4 && (kp.indexOf(k) === 0 || k.indexOf(kp) === 0));
+      if ((d <= tope || contiene) && d < dMejor) { mejor = p; dMejor = d; }
+    });
+    return mejor;
+  }
+
+  function uidP() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function agregar(n) {
+    n = String(n || '').replace(/\s+/g, ' ').trim();
+    if (!n) return null;
+    var ya = buscarExacto(n); if (ya) return ya;
+    var p = { id: uidP(), nombre: n, ts: new Date().toISOString() };
+    var a = leer(); a.push(p); escribir(a);
+    refrescarDatalist(); pintarTarjeta();
+    return p;
+  }
+  function lapida(p) {
+    try {
+      var a = JSON.parse(localStorage.getItem('dm_borrados') || '[]') || [];
+      var k = 'PV' + p.id;
+      if (!a.some(function (r) { return r && r.k === k; })) {
+        a.push({ k: k, clave: K, id: p.id, ts: new Date().toISOString(),
+                 aparato: (localStorage.getItem('dm_aparato') || '') });
+        localStorage.setItem('dm_borrados', JSON.stringify(a));
+      }
+    } catch (e) {}
+  }
+  function quitar(id) {
+    var p = null; leer().forEach(function (x) { if (x && x.id === id) p = x; });
+    if (!p) return;
+    if (!confirm('¿Quitar «' + p.nombre + '» de la lista de proveedores?\n\nLas compras y deudas ya anotadas no cambian.')) return;
+    lapida(p);
+    escribir(leer().filter(function (x) { return x && x.id !== id; }));
+    refrescarDatalist(); pintarTarjeta();
+  }
+  function renombrar(id) {
+    var p = null; leer().forEach(function (x) { if (x && x.id === id) p = x; });
+    if (!p) return;
+    var n = prompt('Nuevo nombre para «' + p.nombre + '»:', p.nombre);
+    n = String(n || '').replace(/\s+/g, ' ').trim();
+    if (!n || n === p.nombre) return;
+    var otro = buscarExacto(n);
+    if (otro && otro.id !== p.id) { alert('Ya existe «' + otro.nombre + '» en la lista.'); return; }
+    /* renombrar = lápida del viejo + uno nuevo, para que viaje igual */
+    lapida(p);
+    var a = leer().filter(function (x) { return x && x.id !== id; });
+    a.push({ id: uidP(), nombre: n, ts: new Date().toISOString() });
+    escribir(a);
+    refrescarDatalist(); pintarTarjeta();
+  }
+
+  /* ── Campos de proveedor ─────────────────────────────────────────────── */
+  function refrescarDatalist() {
+    var dl = document.getElementById(LISTA_ID);
+    if (!dl) {
+      if (!document.body) return;
+      dl = document.createElement('datalist'); dl.id = LISTA_ID; document.body.appendChild(dl);
+    }
+    dl.innerHTML = nombres().map(function (n) { return '<option value="' + esc6(n) + '"></option>'; }).join('');
+  }
+  function esCampo(el) { return !!(el && el.tagName === 'INPUT' && el.id && CAMPOS.test(el.id)); }
+  function quitarPista(el) {
+    var h = document.getElementById(el.id + '-dmprov');
+    if (h) h.parentNode.removeChild(h);
+  }
+  function pista(el, p) {
+    quitarPista(el);
+    var h = document.createElement('div');
+    h.id = el.id + '-dmprov';
+    h.setAttribute('data-v', el.value);
+    h.style.cssText = 'font-size:.76rem;margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+    h.innerHTML = '<span>¿Es <strong>' + esc6(p.nombre) + '</strong>?</span>' +
+      '<button type="button" class="btn btn-success btn-sm" style="padding:2px 8px">Sí, usar ese</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" style="padding:2px 8px">No, es nuevo</button>';
+    var bs = h.querySelectorAll('button');
+    /* que tocar el botón no le quite el foco al campo (si no, el «change»
+       del campo rehace la pregunta y el toque se pierde) */
+    Array.prototype.forEach.call(bs, function (b) { b.onmousedown = function (e) { e.preventDefault(); }; });
+    bs[0].onclick = function () { el.value = p.nombre; quitarPista(el); };
+    bs[1].onclick = function () { agregar(el.value); quitarPista(el); };
+    el.parentNode.insertBefore(h, el.nextSibling);
+  }
+  /* se llama cuando se termina de escribir en un campo de proveedor */
+  function normalizarCampo(el) {
+    var v = String(el.value || '').replace(/\s+/g, ' ').trim();
+    var h0 = document.getElementById(el.id + '-dmprov');
+    if (h0 && h0.getAttribute('data-v') === el.value) return;   /* ya está preguntando por esto */
+    quitarPista(el);
+    if (!v) return;
+    var ex = buscarExacto(v);
+    if (ex) { el.value = ex.nombre; return; }
+    var pa = parecido(v);
+    if (pa) { pista(el, pa); return; }
+    el.value = v;
+    agregar(v);
+  }
+  /* devuelve el nombre ya normalizado (para quien guarde sin pasar por el campo) */
+  function normalizar(n) {
+    var ex = buscarExacto(n);
+    return ex ? ex.nombre : String(n || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function engancharCampos() {
+    document.addEventListener('focusin', function (e) {
+      var el = e.target;
+      if (!esCampo(el)) return;
+      refrescarDatalist();
+      el.setAttribute('list', LISTA_ID);
+      el.setAttribute('autocomplete', 'off');
+    });
+    document.addEventListener('change', function (e) {
+      if (esCampo(e.target)) normalizarCampo(e.target);
+    }, true);
+  }
+
+  /* ── Tarjeta en Configuración ────────────────────────────────────────── */
+  function pintarTarjeta() {
+    var sec = document.getElementById('sec-config');
+    if (!sec) return;
+    var card = document.getElementById('card-proveedores');
+    if (!card) {
+      card = document.createElement('div');
+      card.className = 'card'; card.id = 'card-proveedores';
+      var primera = sec.querySelector('.card');
+      if (primera && primera.nextSibling) sec.insertBefore(card, primera.nextSibling); else sec.appendChild(card);
+    }
+    var ps = lista();
+    card.innerHTML =
+      '<div class="card-header"><h2>🏷️ Proveedores</h2></div>' +
+      '<p style="font-size:.78rem;color:var(--gris);margin-bottom:8px">Al registrar una compra o una deuda, el proveedor se escoge de esta lista para que quede siempre con el mismo nombre. Si escribes uno nuevo, se agrega solo.</p>' +
+      '<div style="display:flex;gap:6px"><input type="text" id="dmprov-nuevo" placeholder="Nombre del proveedor" style="flex:1">' +
+      '<button class="btn btn-primary btn-sm" id="dmprov-agregar">➕ Agregar</button></div>' +
+      '<div id="dmprov-lista" style="margin-top:8px">' +
+      (ps.length ? ps.map(function (p) {
+        return '<div class="mini-row" style="padding:7px 0;border-bottom:1px solid var(--crema2)"><span>' + esc6(p.nombre) + '</span>' +
+          '<span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="padding:2px 8px" data-ren="' + esc6(p.id) + '">✏️</button>' +
+          '<button class="btn btn-ghost btn-sm" style="padding:2px 8px" data-del="' + esc6(p.id) + '">✕</button></span></div>';
+      }).join('') : '<p style="color:var(--gris);font-size:.82rem;text-align:center;padding:8px">Aún no hay proveedores.</p>') +
+      '</div>';
+    document.getElementById('dmprov-agregar').onclick = function () {
+      var inp = document.getElementById('dmprov-nuevo');
+      var v = String(inp.value || '').trim(); if (!v) return;
+      var ya = buscarExacto(v);
+      if (ya) { alert('Ya está en la lista como «' + ya.nombre + '».'); return; }
+      var pa = parecido(v);
+      if (pa && !confirm('Se parece a «' + pa.nombre + '». ¿Agregar «' + v + '» como otro proveedor distinto?')) return;
+      agregar(v);
+    };
+    Array.prototype.forEach.call(card.querySelectorAll('[data-del]'), function (b) {
+      b.onclick = function () { quitar(b.getAttribute('data-del')); };
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('[data-ren]'), function (b) {
+      b.onclick = function () { renombrar(b.getAttribute('data-ren')); };
+    });
+  }
+
+  /* ── Semilla: los proveedores que ya estaban escritos en compras y deudas ── */
+  function sembrar() {
+    try { if (localStorage.getItem(K_SEMILLA)) return Promise.resolve(); } catch (e) { return Promise.resolve(); }
+    var nombresV = [];
+    function tomar(n) { n = String(n || '').replace(/\s+/g, ' ').trim(); if (n && n !== 'Inventario inicial' && n !== 'Conteo') nombresV.push(n); }
+    ['obleas_inv_movimientos', 'dm_ar_mov'].forEach(function (k) {
+      try { (JSON.parse(localStorage.getItem(k) || '[]') || []).forEach(function (m) { if (m) tomar(m.proveedor || m.prov); }); } catch (e) {}
+    });
+    var p = (typeof dbGetAll === 'function' && typeof STORE_FINANZAS !== 'undefined')
+      ? dbGetAll(STORE_FINANZAS).then(function (all) { (all || []).forEach(function (m) { if (m && m.cuenta === 'pagar') tomar(m.proveedor); }); })
+          .catch(function () {})
+      : Promise.resolve();
+    return p.then(function () {
+      /* de los que son el mismo nombre escrito distinto, queda el más usado */
+      var cuenta = {}, forma = {};
+      nombresV.forEach(function (n) {
+        var k = clave(n); cuenta[k] = (cuenta[k] || 0) + 1;
+        forma[k] = forma[k] || {}; forma[k][n] = (forma[k][n] || 0) + 1;
+      });
+      Object.keys(cuenta).forEach(function (k) {
+        var f = forma[k], mejor = null;
+        Object.keys(f).forEach(function (n) { if (!mejor || f[n] > f[mejor]) mejor = n; });
+        if (mejor && !buscarExacto(mejor)) {
+          var a = leer(); a.push({ id: uidP(), nombre: mejor, ts: new Date().toISOString() }); escribir(a);
+        }
+      });
+      try { localStorage.setItem(K_SEMILLA, '1'); } catch (e) {}
+      refrescarDatalist(); pintarTarjeta();
+    });
+  }
+
+  function arrancar() {
+    engancharCampos();
+    refrescarDatalist();
+    pintarTarjeta();
+    /* después del arranque de Ventas (IndexedDB abierta) */
+    setTimeout(function () { sembrar(); }, 1500);
+  }
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arrancar);
+    else arrancar();
+  }
+
+  return { lista: lista, nombres: nombres, agregar: agregar, normalizar: normalizar,
+           clave: clave, parecido: parecido, pintarTarjeta: pintarTarjeta, sembrar: sembrar };
+})();
+
+</script>
+<script>
 /* ===== HERRAMIENTAS AVANZADAS ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMAvanzadas — Recoge las herramientas de diagnóstico y las guarda en una
@@ -18529,7 +19178,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 28/09/2026 19:22</div>
+                margin-top:10px;opacity:.75">Versión del 29/09/2026 22:28</div>
   </div>
 </div>
 
