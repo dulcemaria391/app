@@ -15105,6 +15105,10 @@ var DMSync = (function () {
       /* [30 sep 2026] qué hizo la última vuelta de la sincronización automática */
       var a = null;
       try { a = window.DMAutoSync && DMAutoSync.activo() && DMAutoSync.ultima(); } catch (e) {}
+      /* [30 sep 2026] principio y final del canal, para comparar los dos
+         celulares (y encontrarlo en la consola de Firebase) sin mostrar la clave entera */
+      var cn = canalAuto();
+      if (cn) partes.push('<br>Canal: <strong>' + cn.slice(0, 6) + '…' + cn.slice(-4) + '</strong>.');
       if (a && a.ts) {
         partes.push('<br>Sincronización automática: ' + fechaHora(a.ts) + ' · subió ' + num(a.subio) +
           ' · bajó ' + num(a.bajo) + (a.completa ? ' (revisión completa)' : '') +
@@ -19476,7 +19480,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 30/09/2026 12:49</div>
+                margin-top:10px;opacity:.75">Versión del 30/09/2026 18:03</div>
   </div>
 </div>
 
