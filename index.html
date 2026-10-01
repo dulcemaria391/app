@@ -2957,7 +2957,7 @@ ESTRUCTURA EXACTA DEL FORMULARIO:
 
 JSON A DEVOLVER:
 {
-  "fecha": "YYYY-MM-DD — año siempre 2026 si ves 26 o 25",
+  "fecha": "YYYY-MM-DD — año siempre ${new Date().getFullYear()} si ves solo 2 dígitos o no se ve",
   "operario1": "Yasir si su casilla está marcada, si no vacío",
   "operario2": "Angie si su casilla está marcada, si no vacío",
   "operario3": "Jairo si su casilla está marcada, si no vacío",
@@ -5121,6 +5121,8 @@ function verReporteHTML(){
 function eliminarMovInv(ts,key){
   if(!confirm('¿Eliminar este movimiento de compra?\n\nEsto recalculará el stock y el costo promedio del insumo según el historial restante.')) return;
   var movs = getInvMovimientos();
+  /* [1 oct 2026] la lápida viaja al otro celular (sync.js) */
+  movs.forEach(function(m){ if(m.ts===ts&&m.insumo===key){ try{ if(window.DMSync&&DMSync.marcarBorradoReg) DMSync.marcarBorradoReg('obleas_inv_movimientos',m); }catch(e){} } });
   var movsRestantes = movs.filter(function(m){return !(m.ts===ts&&m.insumo===key);});
   saveInvMovimientos(movsRestantes);
 
@@ -5157,6 +5159,9 @@ function recalcularInventarioDesdeHistorial(){
     var todos = getTurnos();
     if(!todos.length){ alert('No hay turnos de producción guardados.'); return; }
     var movs = getInvMovimientos();
+    /* [1 oct 2026] los consumos que se quitan dejan lápida: si no, el otro
+       celular los conservaba y además recibía los nuevos (consumo doble) */
+    movs.forEach(function(m){ if(m.tipo!=='entrada'){ try{ if(window.DMSync&&DMSync.marcarBorradoReg) DMSync.marcarBorradoReg('obleas_inv_movimientos',m); }catch(e){} } });
     var soloEntradas = movs.filter(function(m){ return m.tipo==='entrada'; });
     saveInvMovimientos(soloEntradas);
     var inv = {};
@@ -5205,9 +5210,12 @@ function editarMovInv(ts,key){
   var costoN = parseFloat(nuevoCostoTotal);
   if(isNaN(costoN)||costoN<0){alert('Costo inválido.');return;}
 
+  var movViejo = JSON.parse(JSON.stringify(mov));
   mov.cantidad = cantN;
   mov.costoTotal = costoN;
   mov.costoUnitario = costoN/cantN;
+  /* [1 oct 2026] versión nueva: el otro celular reemplaza la vieja (sync.js) */
+  try{ if(window.DMSync&&DMSync.nuevaVersion) DMSync.nuevaVersion('obleas_inv_movimientos',movViejo,mov); }catch(e){}
   saveInvMovimientos(movs);
 
   // Recalcular stock y costo promedio desde cero con todos los movimientos del insumo
@@ -5244,6 +5252,9 @@ function corregirUnidadesHarina(){
     movs.forEach(function(m){
       if(m.insumo==='harina'){
         var cant = m.cantidad||0;
+        /* [1 oct 2026] cada corrección es una versión nueva que viaja al otro celular (sync.js) */
+        var mViejo = JSON.parse(JSON.stringify(m));
+        var versionar = function(){ try{ if(window.DMSync&&DMSync.nuevaVersion) DMSync.nuevaVersion('obleas_inv_movimientos',mViejo,m); }catch(e){} };
         if(m.tipo==='entrada' && cant > 0 && cant < 2){
           // Entrada en fracciones → ×1000
           detalles.push('Entrada '+cant.toFixed(3)+' → '+(cant*1000).toFixed(3)+' kg');
@@ -5251,6 +5262,7 @@ function corregirUnidadesHarina(){
           m.costoUnitario = (m.costoUnitario||0) / 1000;
           m.costoTotal = m.cantidad * m.costoUnitario;
           m.stockResultante = (m.stockResultante||0) * 1000;
+          versionar();
           corregidos++;
         } else if(m.tipo==='salida' && cant > 1000){
           // Salida en gramos → ÷1000
@@ -5258,6 +5270,7 @@ function corregirUnidadesHarina(){
           m.cantidad = cant / 1000;
           m.costoTotal = m.cantidad * (m.costoUnitario||0);
           m.stockResultante = (m.stockResultante||0) + cant - (cant/1000);
+          versionar();
           corregidos++;
         }
       }
@@ -6242,7 +6255,7 @@ function ar_escanearIA(){
   ar_gId('progress-txt-ar').textContent='Analizando...';
   arAnimProgress();
   var insumosList=INSUMOS_DEF.map(function(i){ return '"'+i.id+'": 0'; }).join(',\n    ');
-  var prompt='Analiza la imagen del formato FR-PRO-AR-01 de producción de arequipe.\nExtrae TODOS los datos visibles y devuelve ÚNICAMENTE un JSON con esta estructura exacta (null si no se ve):\n{\n  "fecha": "YYYY-MM-DD",\n  "tipo_producto": "",\n  "lote": "",\n  "fecha_vencimiento1": "YYYY-MM-DD",\n  "fecha_vencimiento2": "YYYY-MM-DD",\n  "gas_inicial": 0,\n  "gas_final": 0,\n  "hora_inicio": "HH:MM",\n  "hora_fin": "HH:MM",\n  "brix": 0,\n  "insumos": {\n    '+insumosList+'\n  },\n  "produccion": {\n    "tetero": 0,\n    "bolsa": 0,\n    "tarrina": 0\n  },\n  "observaciones": ""\n}\nREGLAS CRITICAS:\n- "tetero" = cantidad de Arequipe Aplicadores x 400gr (el campo del MEDIO en produccion del lote)\n- "bolsa" = cantidad de Arequipe Bolsas x 500gr (el campo de la IZQUIERDA en produccion del lote)\n- "tarrina" = cantidad de Arequipe tarrinas x 220gr (el campo de la DERECHA en produccion del lote)\n- El campo "nata" corresponde al campo "fos" o "nata" del formato fisico.\n- Lee con cuidado el encabezado de cada columna antes de asignar el numero.\nResponde SOLO con el JSON, sin texto adicional, sin markdown.';
+  var prompt='Analiza la imagen del formato FR-PRO-AR-01 de producción de arequipe.\nExtrae TODOS los datos visibles y devuelve ÚNICAMENTE un JSON con esta estructura exacta (null si no se ve):\n{\n  "fecha": "YYYY-MM-DD",\n  "tipo_producto": "",\n  "lote": "",\n  "fecha_vencimiento1": "YYYY-MM-DD",\n  "fecha_vencimiento2": "YYYY-MM-DD",\n  "gas_inicial": 0,\n  "gas_final": 0,\n  "hora_inicio": "HH:MM",\n  "hora_fin": "HH:MM",\n  "brix": 0,\n  "insumos": {\n    '+insumosList+'\n  },\n  "produccion": {\n    "tetero": 0,\n    "bolsa": 0,\n    "tarrina": 0\n  },\n  "observaciones": ""\n}\nREGLAS CRITICAS:\n- "tetero" = cantidad de Arequipe Aplicadores x 400gr (el campo del MEDIO en produccion del lote)\n- "bolsa" = cantidad de Arequipe Bolsas x 500gr (el campo de la IZQUIERDA en produccion del lote)\n- "tarrina" = cantidad de Arequipe tarrinas x 220gr (el campo de la DERECHA en produccion del lote)\n- El campo "nata" corresponde al campo "fos" o "nata" del formato fisico.\n- Lee con cuidado el encabezado de cada columna antes de asignar el numero.\n- FECHA: el año es '+new Date().getFullYear()+' si en la planilla no se ve o viene con 2 digitos (no inventes otro año).\nResponde SOLO con el JSON, sin texto adicional, sin markdown.';
   var body=JSON.stringify({model:'claude-opus-4-5',max_tokens:2000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:ar_scanB64}},{type:'text',text:prompt}]}]});
   function procesarResp(resp){
     if(!resp.ok){ return resp.json().catch(function(){ return {}; }).then(function(err){
@@ -7706,6 +7719,10 @@ function ejecutarGuardado(f){
 function ejecutarEdicion(f){
   var anterior=CACHE_FACTURAS.find(function(x){return x.id===f.id;});
   if(!anterior){ ejecutarGuardado(f); return; }
+  /* [1 oct 2026] de qué versión viene: si la misma remisión se corrige en los
+     dos celulares, sync.js lo detecta, deja la más reciente y avisa */
+  f.editadaAncestros=(anterior.editadaAncestros||[]).concat([anterior.editada||0]);
+  f.editadoEn=(window.DMSync&&DMSync.aparato)?DMSync.aparato():'';
   f.editada=Date.now(); /* para que el otro celular reemplace su copia (sync.js) */
   revertirFacturaTransaccional(anterior,true).then(function(){
     return persistirFacturaTransaccional(f);
@@ -14156,19 +14173,64 @@ var DMSync = (function () {
       area: 'proveedores' }
   ];
 
-  /* Listas a las que aplican las lápidas, con la misma llave de arriba. */
-  var BORRABLES = [
-    { clave: 'obleas_turnos', llave: function (r) { return 'T' + r.id; } },
-    { clave: 'dm_ar_regs',    llave: function (r) { return 'L' + r.id; } },
-    { clave: 'dm_proveedores', llave: function (r) { return 'PV' + r.id; } }
-  ];
+  /* ── Versiones y lápidas (1 oct 2026) ────────────────────────────────────
+     Para TODO lo que vive en localStorage (compras y consumos de insumos,
+     lotes, turnos, …):
+     - base(r): la identidad del registro, que no cambia aunque se corrija:
+       la llave de siempre. En Obleas (movimientos sin id, la llave sale del
+       contenido) es la que tenía antes de su primera corrección (idOriginal).
+     - llave(r) = base + '@' + editado cuando el registro se corrigió: cada
+       corrección es una VERSIÓN NUEVA que viaja sola. Lo nunca corregido
+       conserva su llave de siempre: no se vuelve a subir nada viejo.
+     - ancestros: las versiones de las que viene (0 = la original). Si dos
+       versiones no vienen una de la otra, se corrigió en los dos celulares:
+       gana la más reciente y se avisa en pantalla.
+     - Lápida (dm_borrados): {k: base, ts}. Borra toda versión hecha ANTES del
+       borrado; una copia vieja que llegue después ya no revive. Una
+       corrección hecha DESPUÉS del borrado (en el otro celular) sobrevive, y
+       se avisa. */
+  LS_HECHOS.forEach(function (h) {
+    var deSiempre = h.llave;
+    h.base = function (r) { return (r && r.idOriginal) || deSiempre(r); };
+    h.llave = function (r) { return h.base(r) + (r && r.editado ? '@' + r.editado : ''); };
+  });
+  function hechoLS(clave) {
+    var x = null;
+    LS_HECHOS.forEach(function (h) { if (h.clave === clave) x = h; });
+    return x;
+  }
+  /* ¿la versión a viene de la versión b (o es la misma)? */
+  function vieneDe(a, b) {
+    var vb = num(b && (b.editado || b.editada));
+    if (num(a && (a.editado || a.editada)) === vb) return true;
+    return ((a && (a.ancestros || a.editadaAncestros)) || []).indexOf(vb) >= 0;
+  }
+  /* lápidas: base → hora del borrado (ms); si hay varias, la más nueva */
+  function mapaMuertos(lista) {
+    var m = {};
+    (lista || []).forEach(function (r) {
+      if (!r || !r.k) return;
+      var t = Date.parse(r.ts || '') || 0;
+      if (!(r.k in m) || t > m[r.k]) m[r.k] = t;
+    });
+    return m;
+  }
+  function estaMuerto(muertos, base, version) {
+    return (base in muertos) && num(version) <= muertos[base];
+  }
+  function tocar(tocados, clave, r) {
+    if (!tocados || !r) return;
+    if (clave === 'obleas_inv_movimientos' && r.insumo) tocados.obleas[r.insumo] = 1;
+    if (clave === 'dm_ar_mov' && r.ins_id) tocados.arequipe[r.ins_id] = 1;
+    if (clave === 'dm_ar_prod_mov' && r.presentacion) tocados.producto[clavePrenda(r)] = 1;
+  }
 
   /* Se llama al borrar (o al reemplazar al corregir) un registro. */
   function marcarBorrado(clave, id) {
-    var b = null;
-    BORRABLES.forEach(function (x) { if (x.clave === clave) b = x; });
-    if (!b || id == null) return;
-    var k = b.llave({ id: id });
+    /* [1 oct 2026] la llave sale de LS_HECHOS (base), igual que las lápidas nuevas */
+    var h = hechoLS(clave);
+    if (!h || id == null) return;
+    var k = h.base({ id: id });
     var arr = leerLS('dm_borrados');
     if (arr.some(function (r) { return r && r.k === k; })) return;
     arr.push({ k: k, clave: clave, id: id, ts: new Date().toISOString(), aparato: aparato() });
@@ -14298,27 +14360,141 @@ var DMSync = (function () {
     });
   }
 
+
   /* Quita de las listas lo que tenga lápida. Devuelve cuántos quitó. */
-  function aplicarBorrados(informe) {
-    var muertos = {};
-    leerLS('dm_borrados').forEach(function (r) { if (r && r.k) muertos[r.k] = true; });
+  function aplicarBorrados(informe, tocados) {
+    var muertos = mapaMuertos(leerLS('dm_borrados'));
+    if (!Object.keys(muertos).length) return 0;
     var total = 0;
-    BORRABLES.forEach(function (b) {
-      var arr = leerLS(b.clave), fechas = {};
+    LS_HECHOS.forEach(function (h) {
+      if (h.clave === 'dm_borrados') return;
+      var arr = leerLS(h.clave), fechas = {};
       var quedan = arr.filter(function (r) {
-        var k; try { k = b.llave(r); } catch (e) { return true; }
-        if (muertos[k]) { if (r && r.fecha) fechas[String(r.fecha).slice(0, 10)] = 1; return false; }
-        return true;
+        var b; try { b = h.base(r); } catch (e) { return true; }
+        if (!estaMuerto(muertos, b, r && r.editado)) {
+          /* corregido DESPUÉS del borrado del otro celular: sobrevive, y se avisa aquí también */
+          if ((b in muertos) && informe) (informe.conflictos = informe.conflictos || []).push(avisoBorradoCorregido(h.clave, b, r));
+          return true;
+        }
+        if (r && r.fecha) fechas[String(r.fecha).slice(0, 10)] = 1;
+        tocar(tocados, h.clave, r);
+        return false;
       });
       if (quedan.length === arr.length) return;
-      escribirLS(b.clave, quedan);
+      escribirLS(h.clave, quedan);
       total += arr.length - quedan.length;
-      if (b.clave === 'obleas_turnos') {
+      if (h.clave === 'obleas_turnos') {
         try { if (typeof window.autoGuardarCostoFechas === 'function') window.autoGuardarCostoFechas(Object.keys(fechas)); } catch (e) {}
       }
     });
     if (total && informe) informe.push(total + ' registro(s) borrado(s) o corregido(s) en el otro celular');
     return total;
+  }
+
+  /* ── Corregir y borrar desde los módulos ──────────────────────────────
+     nuevaVersion(clave, viejo, nuevo): marca «nuevo» como la corrección de
+     «viejo» (no guarda nada: el módulo lo guarda en su lugar).
+     marcarBorradoReg(clave, r): deja la lápida de r. */
+  function nuevaVersion(clave, viejo, nuevo) {
+    var h = hechoLS(clave);
+    if (!h || !viejo || !nuevo) return nuevo;
+    nuevo.idOriginal = h.base(viejo);
+    nuevo.ancestros = (viejo.ancestros || []).concat([num(viejo.editado)]);
+    nuevo.editado = Math.max(Date.now(), num(viejo.editado) + 1);
+    nuevo.editadoEn = aparato() || '';
+    return nuevo;
+  }
+  function marcarBorradoReg(clave, r) {
+    var h = hechoLS(clave);
+    if (!h || !r) return;
+    var k; try { k = h.base(r); } catch (e) { return; }
+    var arr = leerLS('dm_borrados');
+    /* la lápida también va por versiones: si el mismo registro se borra otra
+       vez (después de revivir por una corrección), viaja la lápida nueva */
+    arr.push({ k: k, clave: clave, ts: new Date().toISOString(), aparato: aparato(),
+               editado: Date.now(), que: describir(clave, r) });
+    escribirLS('dm_borrados', arr);
+  }
+
+  /* «la compra de Leche líquida del 30/09 (94 L)» */
+  function describir(clave, r) {
+    if (!r) return 'un registro';
+    var f = String(r.fecha || '').slice(0, 10).split('-').reverse().slice(0, 2).join('/');
+    try {
+      if (clave === 'dm_ar_mov' || clave === 'obleas_inv_movimientos') {
+        var linea = clave === 'dm_ar_mov' ? 'arequipe' : 'obleas';
+        var id = clave === 'dm_ar_mov' ? r.ins_id : r.insumo;
+        var cant = clave === 'dm_ar_mov' ? r.cant : r.cantidad;
+        var tipo = /compra|entrada/.test(r.tipo || '') ? 'la compra' : 'el consumo';
+        return tipo + ' de ' + nombreSaldo({ linea: linea, id: id }).replace(/\s*\([^)]*\)$/, '') +
+               (f ? ' del ' + f : '') + ' (' + num(cant).toLocaleString('es-CO') + ')';
+      }
+      if (clave === 'dm_ar_regs') return 'el lote de ' + (r.producto || 'Arequipe') + (f ? ' del ' + f : '');
+      if (clave === 'obleas_turnos') return 'el turno de obleas' + (f ? ' del ' + f : '');
+    } catch (e) {}
+    var h = hechoLS(clave);
+    return (h ? h.area : 'un registro') + (f ? ' del ' + f : '');
+  }
+  function hora(ms) {
+    var d = new Date(num(ms));
+    return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' +
+           ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+  }
+  function textoConflicto(que, gana, pierde, resumen) {
+    var r = resumen || function () { return ''; };
+    return '⚠️ ' + que.charAt(0).toUpperCase() + que.slice(1) + ' se corrigió en los dos celulares. ' +
+      'Quedó la corrección de ' + (gana.editadoEn || 'el otro celular') + ' (' + hora(gana.editado || gana.editada) + r(gana) + '). ' +
+      'Se descartó la de ' + (pierde.editadoEn || 'el otro celular') + ' (' + hora(pierde.editado || pierde.editada) + r(pierde) + ').';
+  }
+  function avisoBorradoCorregido(clave, base, r) {
+    return { id: 'BC' + base + '@' + r.editado,
+             texto: '⚠️ ' + describir(clave, r).replace(/^./, function (c) { return c.toUpperCase(); }) +
+               ' se borró en un celular y se corrigió después en el otro: quedó la corrección de ' +
+               (r.editadoEn || 'el otro celular') + ' (' + hora(r.editado) + ').' };
+  }
+  function resumenDe(clave) {
+    return function (r) {
+      if (clave === 'dm_ar_mov') return ' · ' + num(r.cant).toLocaleString('es-CO') + (num(r.costoUnit) ? ' a $' + Math.round(num(r.costoUnit)).toLocaleString('es-CO') : '');
+      if (clave === 'obleas_inv_movimientos') return ' · ' + num(r.cantidad).toLocaleString('es-CO') + (num(r.costoTotal) ? ' por $' + Math.round(num(r.costoTotal)).toLocaleString('es-CO') : '');
+      if (r && r.fecha) return ' · fecha ' + String(r.fecha).slice(0, 10);
+      return '';
+    };
+  }
+
+  /* Avisos de conflicto: se guardan (dm_conflictos, solo en este celular) y
+     se muestran una vez. */
+  var LS_CONFLICTOS = 'dm_conflictos';
+  function avisarConflictos(lista) {
+    if (!lista || !lista.length) return 0;
+    var viejos = leerLS(LS_CONFLICTOS), ya = {};
+    viejos.forEach(function (c) { if (c && c.id) ya[c.id] = true; });
+    var nuevos = lista.filter(function (c) { return c && c.id && !ya[c.id]; });
+    if (!nuevos.length) return 0;
+    var t = new Date().toISOString();
+    escribirLS(LS_CONFLICTOS, viejos.concat(nuevos.map(function (c) { return { id: c.id, texto: c.texto, ts: t }; })).slice(-100));
+    mostrarAviso(nuevos.map(function (c) { return c.texto; }));
+    return nuevos.length;
+  }
+  function mostrarAviso(textos) {
+    try {
+      if (!document.body) return;
+      var caja = document.getElementById('dm-conflictos');
+      if (!caja) {
+        caja = document.createElement('div');
+        caja.id = 'dm-conflictos';
+        caja.setAttribute('style', 'position:fixed;left:12px;right:12px;bottom:76px;z-index:9850;background:#fff8e1;' +
+          'color:#3b2a1a;border:2px solid #e0a800;border-radius:12px;padding:12px;font-size:.82rem;' +
+          'box-shadow:0 6px 24px rgba(0,0,0,.25);max-height:50vh;overflow:auto');
+        caja.innerHTML = '<div class="dm-conf-lista"></div><div style="text-align:right;margin-top:8px">' +
+          '<button type="button" class="btn btn-primary btn-sm" id="dm-conflictos-ok">Entendido</button></div>';
+        document.body.appendChild(caja);
+        document.getElementById('dm-conflictos-ok').onclick = function () { caja.remove(); };
+      }
+      var l = caja.querySelector('.dm-conf-lista');
+      textos.forEach(function (t) {
+        var p = document.createElement('p'); p.style.margin = '0 0 6px'; p.textContent = t; l.appendChild(p);
+      });
+    } catch (e) {}
   }
 
   /* ¿Es la variante que no ve costos (encargado)? */
@@ -14529,18 +14705,18 @@ var DMSync = (function () {
 
           /* 0. Lápidas de remisiones y registros de plata (las de aquí y las
                 que traiga el paquete): se quitan aquí y no vuelven a entrar. */
-          var muertos = {};
-          leerLS('dm_borrados').concat((paq.ls && paq.ls.dm_borrados) || [])
-            .forEach(function (r) { if (r && r.k) muertos[r.k] = true; });
+          /* [1 oct 2026] con la hora del borrado: una corrección hecha DESPUÉS
+             del borrado (en el otro celular) sobrevive */
+          var muertos = mapaMuertos(leerLS('dm_borrados').concat((paq.ls && paq.ls.dm_borrados) || []));
           var quitadosX = 0;
           Object.keys(PREF_IDB).forEach(function (s) {
             if (!actual[s]) return;
             var pre = PREF_IDB[s];
             actual[s] = actual[s].filter(function (r) {
-              if (r && muertos[pre + r.id]) { tx.objectStore(s).delete(r.id); quitadosX++; return false; }
+              if (r && estaMuerto(muertos, pre + r.id, r.editada)) { tx.objectStore(s).delete(r.id); quitadosX++; return false; }
               return true;
             });
-            entra[s] = (entra[s] || []).filter(function (r) { return !(r && muertos[pre + r.id]); });
+            entra[s] = (entra[s] || []).filter(function (r) { return !(r && estaMuerto(muertos, pre + r.id, r.editada)); });
           });
           if (quitadosX) informe.push(quitadosX + ' remisión(es)/registro(s) de plata borrado(s) en el otro celular');
 
@@ -14573,14 +14749,38 @@ var DMSync = (function () {
             }
             if (s === 'facturaai_facturas') {
               var editadas = 0;
-              (entra[s] || []).forEach(function (r) {
-                var mia = r && vistos[r.id];
-                if (!mia || num(r.editada) <= num(mia.editada)) return;
-                tx.objectStore(s).put(r);
-                actual[s] = actual[s].map(function (x) { return x.id === r.id ? r : x; });
-                vistos[r.id] = r; editadas++;
-              });
+              informe.conflictos = informe.conflictos || [];
+              (entra[s] || []).slice().sort(function (a, b) { return num(a && a.editada) - num(b && b.editada); })
+                .forEach(function (r) {
+                  var mia = r && vistos[r.id];
+                  if (!mia || num(r.editada) === num(mia.editada)) return;
+                  /* [1 oct 2026] corregida en los dos celulares: gana la más reciente, con aviso */
+                  if (!vieneDe(r, mia) && !vieneDe(mia, r)) {
+                    var gana = num(r.editada) > num(mia.editada) ? r : mia, pierde = gana === r ? mia : r;
+                    informe.conflictos.push({ id: 'CF' + r.id + '@' + gana.editada + '/' + pierde.editada,
+                      texto: textoConflicto('la remisión ' + (r.numero_factura || r.id), gana, pierde, function (x) {
+                        return ' · total $' + Math.round(num(x.total)).toLocaleString('es-CO'); }) });
+                  }
+                  if (num(r.editada) < num(mia.editada)) return;
+                  tx.objectStore(s).put(r);
+                  actual[s] = actual[s].map(function (x) { return x.id === r.id ? r : x; });
+                  vistos[r.id] = r; editadas++;
+                });
               if (editadas) informe.push(editadas + ' remisión(es) corregida(s) en el otro celular');
+            }
+            /* [1 oct 2026] movimiento de stock de Ventas corregido (p. ej. la
+               fecha): vale la versión más nueva; no mueve el stock */
+            if (s === 'facturaai_movimientos') {
+              var movsCorr = 0;
+              (entra[s] || []).slice().sort(function (a, b) { return num(a && a.editada) - num(b && b.editada); })
+                .forEach(function (r) {
+                  var mio = r && vistos[r.id];
+                  if (!mio || num(r.editada) <= num(mio.editada)) return;
+                  tx.objectStore(s).put(r);
+                  actual[s] = actual[s].map(function (x) { return x.id === r.id ? r : x; });
+                  vistos[r.id] = r; movsCorr++;
+                });
+              if (movsCorr) informe.push(movsCorr + ' movimiento(s) de stock corregido(s) en el otro celular');
             }
             var nuevos = (entra[s] || []).filter(function (r) { return r && !vistos[r.id]; });
             /* Cuentas por cobrar/pagar ya pagadas (o abonadas) en el otro
@@ -14762,37 +14962,48 @@ var DMSync = (function () {
   /* Los hechos de localStorage, y el saldo de insumos que se mueve con ellos */
   function unirLS(paq, informe) {
     var entra = paq.ls || {};
+    var tocados = { obleas: {}, arequipe: {}, producto: {} };
+    var muertos = mapaMuertos(leerLS('dm_borrados').concat(entra.dm_borrados || []));
+    informe.conflictos = informe.conflictos || [];
 
     LS_HECHOS.forEach(function (h) {
-      var mios = leerLS(h.clave), suyos = entra[h.clave] || [];
+      var suyos = (entra[h.clave] || []).filter(Boolean);
       if (!suyos.length) return;
-      var vistos = {};
-      mios.forEach(function (r) { try { vistos[h.llave(r)] = true; } catch (e) {} });
-      var nuevos = [];
-      suyos.forEach(function (r) {
-        if (!r) return;
-        var k;
-        try { k = h.llave(r); } catch (e) { return; }
-        if (vistos[k]) return;
-        vistos[k] = true; nuevos.push(r);
+      var lista = leerLS(h.clave), pos = {};
+      lista.forEach(function (r, i) { try { pos[h.base(r)] = i; } catch (e) {} });
+      var nuevos = [], corregidos = 0, esLapida = h.clave === 'dm_borrados';
+      /* de la versión más vieja a la más nueva: así gana la última */
+      suyos.slice().sort(function (a, b) { return num(a.editado) - num(b.editado); }).forEach(function (r) {
+        var b; try { b = h.base(r); } catch (e) { return; }
+        if (!esLapida && estaMuerto(muertos, b, r.editado)) return;   /* borrado: una copia vieja no revive */
+        var i = pos[b];
+        if (i != null && num(r.editado) === num(lista[i].editado)) return;   /* la misma versión: nada que hacer */
+        if (!esLapida && (b in muertos)) informe.conflictos.push(avisoBorradoCorregido(h.clave, b, r));
+        if (i == null) {
+          pos[b] = lista.length; lista.push(r); nuevos.push(r); tocar(tocados, h.clave, r);
+          return;
+        }
+        var mio = lista[i];
+        if (num(r.editado) === num(mio.editado)) return;           /* la misma versión */
+        var conflicto = !esLapida && !vieneDe(r, mio) && !vieneDe(mio, r);
+        var gana = num(r.editado) > num(mio.editado) ? r : mio, pierde = gana === r ? mio : r;
+        if (gana === r) { lista[i] = r; corregidos++; tocar(tocados, h.clave, mio); tocar(tocados, h.clave, r); }
+        if (conflicto) {
+          informe.conflictos.push({ id: 'C' + b + '@' + gana.editado + '/' + pierde.editado,
+            texto: textoConflicto(describir(h.clave, gana), gana, pierde, resumenDe(h.clave)) });
+        }
       });
-      if (!nuevos.length) return;
-      escribirLS(h.clave, ordenar(h.clave, mios.concat(nuevos)));
-      informe.push(nuevos.length + ' ' + h.area);
+      if (!nuevos.length && !corregidos) return;
+      escribirLS(h.clave, ordenar(h.clave, lista));
+      if (nuevos.length) informe.push(nuevos.length + ' ' + h.area);
+      if (corregidos && !esLapida) informe.push(corregidos + ' ' + h.area + ': corregido(s) en el otro celular');
       informe._nuevosLS[h.clave] = nuevos;
     });
 
-    aplicarBorrados(informe);
+    aplicarBorrados(informe, tocados);
 
-    /* [30 sep 2026] Saldos de insumos y de arequipe producido: se
-       RECALCULAN desde el historial completo (ver saldosDesdeHistorial), ya
-       no se suman los movimientos que llegan. Antes se sumaban en un campo
-       («stock») que Arequipe no lee — usa cantActual / cant — y por eso el
-       encargado quedaba en negativo. Solo se tocan los que recibieron algo. */
-    var tocados = { obleas: {}, arequipe: {}, producto: {} };
-    (informe._nuevosLS['obleas_inv_movimientos'] || []).forEach(function (m) { if (m && m.insumo) tocados.obleas[m.insumo] = 1; });
-    (informe._nuevosLS['dm_ar_mov'] || []).forEach(function (m) { if (m && m.ins_id) tocados.arequipe[m.ins_id] = 1; });
-    (informe._nuevosLS['dm_ar_prod_mov'] || []).forEach(function (m) { if (m && m.presentacion) tocados.producto[clavePrenda(m)] = 1; });
+    /* [30 sep 2026] Saldos: se RECALCULAN desde el historial completo de los
+       insumos que recibieron algo nuevo, corregido o borrado. */
     var cambios = saldosDesdeHistorial(tocados).filter(cambia);
     if (cambios.length) {
       aplicarSaldos(cambios);
@@ -15051,6 +15262,135 @@ var DMSync = (function () {
     return n;
   }
 
+  /* ── Fechas ──────────────────────────────────────────────────────────────
+     [1 oct 2026] Diez lotes de arequipe quedaron con 2024: se registraron
+     días después escaneando la planilla, y la instrucción del escaneo de
+     Arequipe no le decía el año a la IA (la de Obleas sí: «año siempre
+     2026»). Se corrigen una vez, en el principal, como versiones nuevas que
+     viajan solas al encargado y a Firebase; el lote borrado el 24 sep que
+     revivió (1790257581213) se borra con lápida. Las fechas no entran en
+     los saldos. */
+  var K_MIG_FECHAS = 'dm_mig_fechas_2024_v1';
+  var LOTES_2024 = ['1789085236260', '1789085374130', '1789834335249', '1789834807400', '1789834989257',
+                    '1789835094960', '1789835704934', '1790169876633', '1790257948776'];
+  var LOTE_REVIVIDO = '1790257581213';
+  function a2026(v) { return (typeof v === 'string' && /^2024-\d\d-\d\d/.test(v)) ? '2026' + v.slice(4) : v; }
+  function sin2024(txt) { return typeof txt === 'string' ? txt.replace(/2024-(\d\d-\d\d)/g, '2026-$1') : txt; }
+  function corregirFechas2024() {
+    if (leerFlag(K_MIG_FECHAS) || !window.DM_AUTOSYNC_ORIGEN) return Promise.resolve(null);
+    var res = { lotes: 0, movs: 0, prod: 0, ventas: 0, borrado: 0 };
+    /* lotes */
+    var regs = leerLS('dm_ar_regs');
+    regs = regs.map(function (r) {
+      if (!r || LOTES_2024.indexOf(String(r.id)) < 0 || !/^2024-/.test(String(r.fecha))) return r;
+      var n = JSON.parse(JSON.stringify(r));
+      Object.keys(n).forEach(function (k) { n[k] = a2026(n[k]); });
+      res.lotes++;
+      return nuevaVersion('dm_ar_regs', r, n);
+    });
+    escribirLS('dm_ar_regs', regs);
+    /* movimientos de insumos y de arequipe producido */
+    [['dm_ar_mov', 'movs'], ['dm_ar_prod_mov', 'prod']].forEach(function (x) {
+      var arr = leerLS(x[0]);
+      arr = arr.map(function (m) {
+        if (!m || !(/^2024-/.test(String(m.fecha)) || /2024-\d\d-\d\d/.test(String(m.ref || '')))) return m;
+        var n = JSON.parse(JSON.stringify(m));
+        n.fecha = a2026(n.fecha); n.ref = sin2024(n.ref);
+        res[x[1]]++;
+        return nuevaVersion(x[0], m, n);
+      });
+      escribirLS(x[0], arr);
+    });
+    /* el lote borrado que revivió */
+    if (regs.some(function (r) { return r && String(r.id) === LOTE_REVIVIDO; })) {
+      marcarBorrado('dm_ar_regs', Number(LOTE_REVIVIDO));
+      res.borrado = 1;
+    }
+    aplicarBorrados(null, null);
+    /* entradas al inventario de Ventas (IndexedDB) */
+    return new Promise(function (ok) {
+      if (!window.indexedDB) return ok();
+      var req; try { req = indexedDB.open('facturaai_db'); } catch (e) { return ok(); }
+      req.onerror = function () { ok(); };
+      req.onsuccess = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains('facturaai_movimientos')) { db.close(); return ok(); }
+        var tx = db.transaction('facturaai_movimientos', 'readwrite'), st = tx.objectStore('facturaai_movimientos');
+        var g = st.getAll();
+        g.onsuccess = function () {
+          (g.result || []).forEach(function (m) {
+            if (!m || !(/^2024-/.test(String(m.fecha)) || /2024-\d\d-\d\d/.test(String(m.ref || '')))) return;
+            m.fecha = a2026(m.fecha); m.ref = sin2024(m.ref);
+            m.editadaAncestros = (m.editadaAncestros || []).concat([num(m.editada)]);
+            m.editada = Date.now(); m.editadoEn = aparato();
+            st.put(m); res.ventas++;
+          });
+        };
+        tx.oncomplete = function () { db.close(); ok(); };
+        tx.onerror = tx.onabort = function () { try { db.close(); } catch (e) {} ok(); };
+      };
+    }).then(function () {
+      if (!fallosGuardado.length) ponerFlag(K_MIG_FECHAS);
+      return res;
+    });
+  }
+
+  /* Controles para que no vuelva a pasar:
+     - después de leer una planilla por foto, si la fecha es de otro año, se
+       pone el año actual y se avisa;
+     - al guardar un lote o un turno con fecha a más de 60 días de hoy, se
+       pide confirmar. */
+  function hoyISO() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function fechaDelAnio(f) {
+    var anio = String(new Date().getFullYear());
+    if (!/^\d{4}-\d\d-\d\d$/.test(String(f || '')) || f.slice(0, 4) === anio) return { fecha: f, cambiada: false };
+    return { fecha: anio + f.slice(4), cambiada: true, antes: f };
+  }
+  function revisarFechaLeida(idCampo) {
+    var el = document.getElementById(idCampo);
+    if (!el || !el.value) return false;
+    var r = fechaDelAnio(el.value);
+    if (!r.cambiada) return false;
+    el.value = r.fecha;
+    alert('📅 La planilla decía ' + r.antes.split('-').reverse().join('/') + '. Se puso el año actual: ' +
+          r.fecha.split('-').reverse().join('/') + '.\n\nRevisa la fecha antes de guardar.');
+    return true;
+  }
+  function fechaRara(f) {
+    if (!/^\d{4}-\d\d-\d\d$/.test(String(f || ''))) return false;
+    var dias = Math.round((Date.parse(f) - Date.parse(hoyISO())) / 86400000);
+    return Math.abs(dias) > 60 ? dias : false;
+  }
+  function confirmarFecha(f) {
+    var dias = fechaRara(f);
+    if (dias === false) return true;
+    return confirm('📅 La fecha es ' + f.split('-').reverse().join('/') + ': ' +
+      (dias < 0 ? 'hace ' + (-dias) : 'dentro de ' + dias) + ' días.\n\n¿Seguro que la fecha está bien?');
+  }
+  function envolver(nombre, antes, despues) {
+    var orig = window[nombre];
+    if (typeof orig !== 'function' || orig._dmFechas) return;
+    var nueva = function () {
+      if (antes && antes() === false) return;
+      var r = orig.apply(this, arguments);
+      if (despues) { try { despues(); } catch (e) {} }
+      return r;
+    };
+    nueva._dmFechas = true;
+    try { window[nombre] = nueva; } catch (e) {}
+  }
+  function instalarControlesDeFecha() {
+    var campo = function (id) { return function () { var el = document.getElementById(id); return confirmarFecha(el && el.value); }; };
+    envolver('guardarRegistro', campo('r-fecha'));                 /* lote de arequipe */
+    envolver('guardarScan', campo('s-fecha'));                     /* turno de obleas (escaneado) */
+    envolver('guardarManual', campo('e-fecha'));                   /* turno de obleas (a mano) */
+    envolver('aplicarScan', null, function () { revisarFechaLeida('r-fecha'); });          /* planilla de arequipe leída */
+    envolver('mostrarResultadoIA', null, function () { revisarFechaLeida('s-fecha'); });   /* planilla de obleas leída */
+  }
+
   /* El catálogo que manda el dueño: productos, precios y clientes. */
   function unirCatalogo(paq, informe) {
     return new Promise(function (res) {
@@ -15162,6 +15502,7 @@ var DMSync = (function () {
 
     return trabajo.then(function () {
       if (fallosGuardado.length) throw errorAlmacenamiento(fallosGuardado);
+      try { avisarConflictos(informe.conflictos); } catch (e) {}
       /* [1 oct 2026] llegaron remisiones: sus fotos se achican en segundo plano */
       if ((informe._factNuevas || []).some(function (f) { return f && f.imagen; }) && window.DMFotos) {
         setTimeout(function () { try { DMFotos.comprimirPendientes(); } catch (e) {} }, 500);
@@ -15303,6 +15644,8 @@ var DMSync = (function () {
     if (store === 'facturaai_facturas' && r.id && r.editada) return r.id + '@' + r.editada;
     /* [29 sep 2026] movimiento de caja/bancos editado (✏️): igual que la remisión */
     if (store === 'facturaai_finanzas' && r.id && r.editada) return r.id + '@' + r.editada;
+    /* [1 oct 2026] movimiento de stock corregido (fechas 2024 → 2026) */
+    if (store === 'facturaai_movimientos' && r.id && r.editada) return r.id + '@' + r.editada;
     if (esHechoIDB(store)) return r.id || null;
     var h = null;
     LS_HECHOS.forEach(function (x) { if (x.clave === store) h = x; });
@@ -15409,6 +15752,12 @@ var DMSync = (function () {
     });
   }, 5000);
   /* [30 sep 2026] después de que Obleas/Arequipe carguen su inventario */
+  try { instalarControlesDeFecha(); } catch (e) { console.warn('controles de fecha:', e); }
+  setTimeout(function () {
+    corregirFechas2024().then(function (r) {
+      if (r && (r.lotes || r.borrado)) { try { if (typeof renderTabla === 'function') renderTabla(); } catch (e) {} }
+    }).catch(function (e) { console.warn('corregirFechas2024:', e); });
+  }, 6000);
   setTimeout(function () {
     try { if (ordenarMovimientos()) { try { if (typeof inv_renderHistorial === 'function') inv_renderHistorial(); } catch (x) {} } }
     catch (e) { console.warn('ordenarMovimientos:', e); }
@@ -15427,6 +15776,8 @@ var DMSync = (function () {
     unir: unir, unirArchivo: unirArchivo, pintar: pintar,
     revisarSincronizacion: revisarSincronizacion,
     marcarBorrado: marcarBorrado, aplicarBorrados: aplicarBorrados,
+    nuevaVersion: nuevaVersion, marcarBorradoReg: marcarBorradoReg, avisarConflictos: avisarConflictos,
+    corregirFechas2024: corregirFechas2024, fechaDelAnio: fechaDelAnio, confirmarFecha: confirmarFecha,
     marcarBorradoIDB: marcarBorradoIDB,
     pendientesSobrantes: pendientesSobrantes, depurarPendientes: depurarPendientes,
     arreglosUnaVez: arreglosUnaVez,
@@ -17859,6 +18210,8 @@ var DMCorregir = (function () {
 
     if (linea === 'obleas') {
       var movs = leer('obleas_inv_movimientos', []);
+      /* [1 oct 2026] la lápida viaja al otro celular, que lo borra y recalcula su saldo */
+      try { if (window.DMSync && DMSync.marcarBorradoReg) DMSync.marcarBorradoReg('obleas_inv_movimientos', movs[mov.i]); } catch (e) {}
       movs.splice(mov.i, 1);
       escribir('obleas_inv_movimientos', movs);
       var r = replay(movimientos('obleas', id).slice().reverse());
@@ -17871,6 +18224,7 @@ var DMCorregir = (function () {
       try { if (typeof renderComprasRecientes === 'function') renderComprasRecientes(); } catch (e) {}
     } else {
       var mv = leer('dm_ar_mov', []);
+      try { if (window.DMSync && DMSync.marcarBorradoReg) DMSync.marcarBorradoReg('dm_ar_mov', mv[mov.i]); } catch (e) {}
       mv.splice(mov.i, 1);
       escribir('dm_ar_mov', mv);
       /* la lista de arequipe va del mas nuevo al mas viejo: se invierte para
@@ -19930,7 +20284,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 01/10/2026 17:29</div>
+                margin-top:10px;opacity:.75">Versión del 01/10/2026 18:18</div>
   </div>
 </div>
 
