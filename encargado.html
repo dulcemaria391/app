@@ -7248,22 +7248,23 @@ function buscarDuplicado(numero){
 var vt_scanB64=null, vt_scanData=null;
 var scanThumb=null; /* miniatura legible que se guardará en la factura */
 
-/* genera una miniatura legible: redimensiona a máx 900px de ancho y comprime como JPEG.
-   Reduce el peso de ~2-5 MB a ~80-150 KB, manteniéndose legible. */
+/* genera una miniatura legible: redimensiona a máx 1000px de ancho y comprime como JPEG.
+   [1 oct 2026] «opción B» (calidad 0,55): ~100-130 KB y los números escritos a mano se
+   leen igual que en la original. Mismos valores que DMFotos (fotos.js), que comprime
+   las fotos ya guardadas. */
 function generarMiniatura(srcDataUrl){
   return new Promise(function(res){
     try{
       var img=new Image();
       img.onload=function(){
-        var maxW=900;
+        var maxW=1000;
         var escala=img.width>maxW?(maxW/img.width):1;
         var w=Math.round(img.width*escala), h=Math.round(img.height*escala);
         var cv=document.createElement('canvas'); cv.width=w; cv.height=h;
         var ctx=cv.getContext('2d');
         ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h);
         ctx.drawImage(img,0,0,w,h);
-        /* calidad 0.7 = buen balance entre legible y liviano */
-        res(cv.toDataURL('image/jpeg',0.7));
+        res(cv.toDataURL('image/jpeg',0.55));
       };
       img.onerror=function(){ res(srcDataUrl); }; /* si falla, devuelve la original */
       img.src=srcDataUrl;
@@ -14776,7 +14777,7 @@ var DMSync = (function () {
         vistos[k] = true; nuevos.push(r);
       });
       if (!nuevos.length) return;
-      escribirLS(h.clave, mios.concat(nuevos));
+      escribirLS(h.clave, ordenar(h.clave, mios.concat(nuevos)));
       informe.push(nuevos.length + ' ' + h.area);
       informe._nuevosLS[h.clave] = nuevos;
     });
@@ -14811,7 +14812,12 @@ var DMSync = (function () {
 
      Solo la CANTIDAD: el costo promedio no se toca aquí. Un insumo sin
      ningún movimiento se deja como está (no hay historial para recalcular). */
-  var K_MIG_SALDOS = 'dm_mig_saldos_historial_v1';
+  /* [1 oct 2026] v2: la tabla v1 se aceptó en el encargado con el «Aplicar»
+     viejo, que escribía lo calculado AL ABRIR la tabla y pisó compras que
+     llegaron con la tabla abierta (leche líquida quedó en −110 en vez de 0).
+     Se sube la versión para que la tabla vuelva a salir una vez en cada
+     celular; ahora «Aplicar» recalcula al pulsar. */
+  var K_MIG_SALDOS = 'dm_mig_saldos_historial_v2';
 
   function clavePrenda(m) {
     var producto = m.producto || 'Arequipe';
@@ -14882,7 +14888,7 @@ var DMSync = (function () {
           s += t.signo * t.cant;
         });
         filas.push({ linea: L.linea, id: id, actual: num((saldos[id] || {})[L.campo]),
-                     nuevo: Math.round(s * 1e6) / 1e6, ej: movs[movs.length - 1] });
+                     nuevo: Math.round(s * 1e6) / 1e6, ej: movs[movs.length - 1], movs: movs.length });
       });
     });
     return filas;
@@ -14934,20 +14940,50 @@ var DMSync = (function () {
     mostrarTablaSaldos(cambios);
   }
 
-  function mostrarTablaSaldos(cambios) {
+  /* Botón «📦 Revisar saldos»: la misma tabla, a mano, con TODOS los insumos
+     y cuántos movimientos tiene cada uno (para comparar los dos celulares:
+     si el número de movimientos es igual, el historial es el mismo). */
+  function revisarSaldos() {
+    var filas = saldosDesdeHistorial(null);
+    mostrarTablaSaldos(filas.filter(cambia), { todas: filas });
+    return filas;
+  }
+
+  /* Al terminar la revisión completa de la sincronización: si algún saldo no
+     cuadra con el historial, mostrar la tabla en vez de quedarse callada. */
+  function revisarSaldosSiDescuadre() {
+    var cambios = saldosDesdeHistorial(null).filter(cambia);
+    if (cambios.length) mostrarTablaSaldos(cambios);
+    return cambios.length;
+  }
+
+  function mostrarTablaSaldos(cambios, opc) {
+    opc = opc || {};
     if (!document.body || document.getElementById('dm-saldos-mig')) return;
     var e = function (s) {
       return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
     };
     var n = function (v) { return Number(v).toLocaleString('es-CO', { maximumFractionDigits: 3 }); };
     var titulos = { obleas: 'Obleas', arequipe: 'Arequipe', producto: 'Arequipe producido' };
-    var filas = cambios.map(function (f) {
-      var d = f.nuevo - f.actual;
-      return '<tr><td>' + e(titulos[f.linea]) + '</td><td>' + e(nombreSaldo(f)) + '</td>' +
+    var lista = opc.todas || cambios;
+    var filas = lista.map(function (f) {
+      var d = f.nuevo - f.actual, mal = cambia(f);
+      return '<tr' + (opc.todas && mal ? ' style="background:#fdecea"' : '') + '><td>' + e(titulos[f.linea]) + '</td>' +
+        '<td>' + e(nombreSaldo(f)) + '</td>' +
+        '<td style="text-align:right">' + num(f.movs) + '</td>' +
         '<td style="text-align:right">' + n(f.actual) + '</td>' +
         '<td style="text-align:right"><b>' + n(f.nuevo) + '</b></td>' +
-        '<td style="text-align:right;color:' + (d < 0 ? '#b3261e' : '#1e7b34') + '">' + (d > 0 ? '+' : '') + n(d) + '</td></tr>';
+        '<td style="text-align:right;color:' + (d < 0 ? '#b3261e' : '#1e7b34') + '">' +
+          (mal ? (d > 0 ? '+' : '') + n(d) : '✓') + '</td></tr>';
     }).join('');
+    var intro = !opc.todas
+      ? 'Los saldos se van a recalcular desde el historial de movimientos, para que este celular y el otro ' +
+        'queden iguales. El inventario inicial cuenta una sola vez. Estos son los que cambian:'
+      : (cambios.length
+        ? cambios.length + ' saldo(s) no cuadran con su historial (en rojo). «Movs.» es cuántos movimientos ' +
+          'tiene cada insumo: si en el otro celular es el mismo número, los dos tienen el mismo historial.'
+        : '✅ Todos los saldos cuadran con su historial. «Movs.» es cuántos movimientos tiene cada insumo: ' +
+          'compáralo con el otro celular.');
     var caja = document.createElement('div');
     caja.id = 'dm-saldos-mig';
     caja.setAttribute('style', 'position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.45);' +
@@ -14956,18 +14992,19 @@ var DMSync = (function () {
       '<div style="background:#fff;color:#3b2a1a;border-radius:14px;max-width:560px;width:100%;' +
         'max-height:88vh;overflow:auto;padding:16px;font-size:.85rem;box-shadow:0 8px 30px rgba(0,0,0,.3)">' +
       '<h3 style="margin:0 0 6px">📦 Revisar saldos de insumos</h3>' +
-      '<p style="margin:0 0 10px">Los saldos se van a recalcular desde el historial de movimientos, ' +
-        'para que este celular y el otro queden iguales. El inventario inicial cuenta una sola vez. ' +
-        'Estos son los que cambian:</p>' +
+      '<p style="margin:0 0 10px">' + intro + '</p>' +
       '<table style="width:100%;border-collapse:collapse" cellpadding="4">' +
         '<thead><tr style="border-bottom:1px solid #ccc;text-align:left"><th>Módulo</th><th>Insumo</th>' +
-        '<th style="text-align:right">Actual</th><th style="text-align:right">Recalculado</th>' +
+        '<th style="text-align:right">Movs.</th>' +
+        '<th style="text-align:right">Actual</th><th style="text-align:right">Según historial</th>' +
         '<th style="text-align:right">Cambio</th></tr></thead><tbody>' + filas + '</tbody></table>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">' +
-        '<button type="button" id="dm-saldos-no" class="btn btn-ghost btn-sm">Ahora no</button>' +
-        '<button type="button" id="dm-saldos-si" class="btn btn-primary btn-sm">Aplicar</button></div></div>';
+        '<button type="button" id="dm-saldos-no" class="btn btn-ghost btn-sm">' + (cambios.length ? 'Ahora no' : 'Cerrar') + '</button>' +
+        (cambios.length ? '<button type="button" id="dm-saldos-si" class="btn btn-primary btn-sm">Aplicar</button>' : '') +
+      '</div></div>';
     document.body.appendChild(caja);
     document.getElementById('dm-saldos-no').onclick = function () { caja.remove(); };
+    if (!cambios.length) return;
     document.getElementById('dm-saldos-si').onclick = function () {
       /* [30 sep 2026] se recalcula AL PULSAR: si mientras la tabla estaba
          abierta entró una compra del otro celular, no se pisa con lo viejo */
@@ -14978,6 +15015,40 @@ var DMSync = (function () {
         try { if (typeof window[fn] === 'function') window[fn](); } catch (x) {}
       });
     };
+  }
+
+  /* ── Orden de las listas de movimientos ────────────────────────────────
+     [1 oct 2026] Al unir, lo que llegaba se agregaba AL FINAL. Arequipe guarda
+     y muestra del más nuevo al más viejo y su historial pinta solo los
+     primeros 80: con leche líquida (un consumo por lote) las compras que
+     llegaban del otro celular quedaban después del 80 y no se veían. Ahora
+     cada lista queda en el orden en que la guarda su módulo. Solo cambia el
+     orden: ni una llave cambia, así que nada se vuelve a subir a internet. */
+  var ORDEN_LISTAS = {
+    obleas_inv_movimientos: { sentido: 1,  hora: function (m) { return Date.parse(m.ts || '') || Date.parse(m.fecha || '') || 0; } },
+    dm_ar_mov:              { sentido: -1, hora: horaId },
+    dm_ar_prod_mov:         { sentido: -1, hora: horaId }
+  };
+  function ordenar(clave, arr) {
+    var o = ORDEN_LISTAS[clave];
+    if (!o) return arr;
+    return arr.map(function (m, i) { return { m: m, i: i, t: m ? o.hora(m) : 0 }; })
+      .sort(function (a, b) { return ((a.t - b.t) * o.sentido) || (a.i - b.i); })
+      .map(function (x) { return x.m; });
+  }
+  /* Al abrir la app: reordena las listas que ya quedaron desordenadas.
+     Si ya están en orden, no escribe nada. */
+  function ordenarMovimientos() {
+    var n = 0;
+    Object.keys(ORDEN_LISTAS).forEach(function (clave) {
+      var arr = leerLS(clave);
+      if (arr.length < 2) return;
+      var ord = ordenar(clave, arr);
+      for (var i = 0; i < arr.length; i++) {
+        if (ord[i] !== arr[i]) { if (escribirLS(clave, ord)) n++; return; }
+      }
+    });
+    return n;
   }
 
   /* El catálogo que manda el dueño: productos, precios y clientes. */
@@ -15091,6 +15162,10 @@ var DMSync = (function () {
 
     return trabajo.then(function () {
       if (fallosGuardado.length) throw errorAlmacenamiento(fallosGuardado);
+      /* [1 oct 2026] llegaron remisiones: sus fotos se achican en segundo plano */
+      if ((informe._factNuevas || []).some(function (f) { return f && f.imagen; }) && window.DMFotos) {
+        setTimeout(function () { try { DMFotos.comprimirPendientes(); } catch (e) {} }, 500);
+      }
       try { localStorage.setItem(LS_ULTIMA, new Date().toISOString()); } catch (e) {}
       return informe;
     });
@@ -15146,6 +15221,8 @@ var DMSync = (function () {
          celulares (y encontrarlo en la consola de Firebase) sin mostrar la clave entera */
       var cn = canalAuto();
       if (cn) partes.push('<br>Canal: <strong>' + cn.slice(0, 6) + '…' + cn.slice(-4) + '</strong>.');
+      /* [1 oct 2026] cuánto espacio usa la app (las fotos van en IndexedDB) */
+      try { var esp = window.DMFotos && DMFotos.textoEspacio(); if (esp) partes.push('<br>' + esp); } catch (e) {}
       if (a && a.ts) {
         partes.push('<br>Sincronización automática: ' + fechaHora(a.ts) + ' · subió ' + num(a.subio) +
           ' · bajó ' + num(a.bajo) +
@@ -15332,7 +15409,11 @@ var DMSync = (function () {
     });
   }, 5000);
   /* [30 sep 2026] después de que Obleas/Arequipe carguen su inventario */
-  setTimeout(function () { try { revisarSaldosUnaVez(); } catch (e) { console.warn('revisarSaldosUnaVez:', e); } }, 4000);
+  setTimeout(function () {
+    try { if (ordenarMovimientos()) { try { if (typeof inv_renderHistorial === 'function') inv_renderHistorial(); } catch (x) {} } }
+    catch (e) { console.warn('ordenarMovimientos:', e); }
+    try { revisarSaldosUnaVez(); } catch (e) { console.warn('revisarSaldosUnaVez:', e); }
+  }, 4000);
   setTimeout(function () {
     depurarPendientes().then(function (n) {
       if (n) { try { if (typeof refrescarTodo === 'function') refrescarTodo(); } catch (e) {} }
@@ -15350,7 +15431,8 @@ var DMSync = (function () {
     pendientesSobrantes: pendientesSobrantes, depurarPendientes: depurarPendientes,
     arreglosUnaVez: arreglosUnaVez,
     saldosDesdeHistorial: saldosDesdeHistorial, aplicarSaldos: aplicarSaldos,
-    revisarSaldosUnaVez: revisarSaldosUnaVez,
+    revisarSaldosUnaVez: revisarSaldosUnaVez, revisarSaldos: revisarSaldos,
+    revisarSaldosSiDescuadre: revisarSaldosSiDescuadre, ordenarMovimientos: ordenarMovimientos,
     canalAuto: canalAuto,
     esHechoIDB: esHechoIDB, llaveDe: llaveDe, todosLosHechos: todosLosHechos,
     hechosLocales: hechosLocales
@@ -15727,7 +15809,11 @@ var DMAutoSync = (function () {
       function siguiente() {
         if (vuelta.vencida) throw new Error('tiempo');
         var r = resumenRevision(orden);
-        if (!r.faltan.length) { guardarOFallar(LS_REVISION, new Date().toISOString()); return; }
+        if (!r.faltan.length) {
+          guardarOFallar(LS_REVISION, new Date().toISOString());
+          vuelta.revisionTerminada = true;
+          return;
+        }
         if (Date.now() - inicio > LIMITE_MS - RESERVA_MS) return;    /* sigue en la próxima vuelta */
         return revisarPagina(c, r.faltan[0], vuelta).then(function (p) { res.bajo += p.n; return siguiente(); });
       }
@@ -15763,6 +15849,11 @@ var DMAutoSync = (function () {
         guardarUltima(res);
         sincronizando = false;
         try { DMSync.pintar(); } catch (e) {}
+        /* [1 oct 2026] revisión completa terminada: si algún saldo no cuadra
+           con el historial, se muestra la tabla en vez de quedarse callada */
+        if (vuelta.revisionTerminada && !vuelta.vencida) {
+          try { DMSync.revisarSaldosSiDescuadre(); } catch (e) {}
+        }
         return res;
       });
   }
@@ -18524,6 +18615,190 @@ var DMProveedores = (function () {
 
 </script>
 <script>
+/* ===== FOTOS DE REMISIONES MAS LIVIANAS ===== */
+/* ═══════════════════════════════════════════════════════════════════════════
+   DMFotos — fotos de las remisiones más livianas, sin perder ninguna.
+
+   Las fotos van DENTRO de cada remisión (campo «imagen», un data:image/jpeg)
+   en IndexedDB (facturaai_db → facturaai_facturas), nunca en localStorage.
+   Pesaban hasta 365 KB cada una (34 fotos = 9,2 MB). Con la «opción B»
+   — color, máximo 1000 px de ancho, calidad JPEG 0,55 — quedan en ~103 KB
+   (máx. ~127 KB) y los números y nombres escritos a mano se leen igual.
+
+   Qué hace:
+   - comprimirPendientes(): toda foto de más de UMBRAL se vuelve a guardar
+     comprimida. Solo se reemplaza si la nueva (1) se puede abrir como imagen,
+     (2) tiene las medidas esperadas y (3) pesa menos. Si algo falla, queda la
+     original. Nunca se borra una remisión ni una foto.
+   - Corre al abrir la app, cada 5 min con la app abierta y después de cada
+     unión con el otro celular (sync.js la llama).
+   - No cambia la llave de la remisión (id, o id@editada): la sincronización
+     no la vuelve a subir. Las originales siguen en Firebase como respaldo.
+   - Pide a Chrome almacenamiento persistente (que no borre los datos del
+     sitio si el teléfono se llena) y cuenta cuánto espacio usa la app.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var DMFotos = (function () {
+  'use strict';
+
+  var ANCHO_MAX = 1000;         /* px */
+  var CALIDAD = 0.55;           /* JPEG */
+  var UMBRAL = 150 * 1024;      /* caracteres del data URL: las comprimidas quedan por debajo */
+  var CADA_MS = 5 * 60 * 1000;
+
+  var corriendo = null;
+  var ultimo = { revisadas: 0, comprimidas: 0, antes: 0, despues: 0, fallidas: 0 };
+
+  function abrirImagen(src) {
+    return new Promise(function (res, rej) {
+      var img = new Image();
+      img.onload = function () { (img.naturalWidth > 0 && img.naturalHeight > 0) ? res(img) : rej(new Error('vacía')); };
+      img.onerror = function () { rej(new Error('no se pudo abrir')); };
+      img.src = src;
+    });
+  }
+
+  /* data URL → data URL comprimido (opción B). Rechaza si no sirve. */
+  function comprimir(src) {
+    return abrirImagen(src).then(function (img) {
+      var esc = Math.min(1, ANCHO_MAX / img.naturalWidth);
+      var w = Math.round(img.naturalWidth * esc), h = Math.round(img.naturalHeight * esc);
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var c = cv.getContext('2d');
+      c.fillStyle = '#fff'; c.fillRect(0, 0, w, h);
+      c.drawImage(img, 0, 0, w, h);
+      var nueva = cv.toDataURL('image/jpeg', CALIDAD);
+      /* comprobar que la nueva se abre y tiene las medidas que debe */
+      return abrirImagen(nueva).then(function (img2) {
+        if (img2.naturalWidth !== w || img2.naturalHeight !== h) throw new Error('medidas distintas');
+        return nueva;
+      });
+    });
+  }
+
+  function abrirDB() {
+    return new Promise(function (res, rej) {
+      if (!window.indexedDB) return rej(new Error('sin IndexedDB'));
+      var req = indexedDB.open('facturaai_db');
+      req.onerror = function () { rej(req.error); };
+      req.onsuccess = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains('facturaai_facturas')) { db.close(); return rej(new Error('sin remisiones')); }
+        res(db);
+      };
+    });
+  }
+  function leerTodas(db) {
+    return new Promise(function (res, rej) {
+      var g = db.transaction('facturaai_facturas', 'readonly').objectStore('facturaai_facturas').getAll();
+      g.onsuccess = function () { res(g.result || []); };
+      g.onerror = function () { rej(g.error); };
+    });
+  }
+  /* reemplaza SOLO la foto de una remisión, releyéndola dentro de la misma
+     transacción (por si cambió mientras se comprimía) */
+  function guardarFoto(db, id, original, nueva) {
+    return new Promise(function (res) {
+      var tx = db.transaction('facturaai_facturas', 'readwrite');
+      var st = tx.objectStore('facturaai_facturas');
+      var g = st.get(id);
+      var hecho = false;
+      g.onsuccess = function () {
+        var f = g.result;
+        if (!f || f.imagen !== original) return;      /* cambió mientras tanto: no se toca */
+        f.imagen = nueva;
+        f.imagenComprimida = { antesKB: Math.round(original.length / 1024), ts: Date.now() };
+        st.put(f);
+        hecho = true;
+      };
+      tx.oncomplete = function () { res(hecho); };
+      tx.onerror = tx.onabort = function () { res(false); };
+    });
+  }
+
+  function comprimirPendientes() {
+    if (corriendo) return corriendo;
+    var r = { revisadas: 0, comprimidas: 0, antes: 0, despues: 0, fallidas: 0 };
+    corriendo = abrirDB().then(function (db) {
+      return leerTodas(db).then(function (todas) {
+        /* una foto ya comprimida no se vuelve a comprimir aunque siga por encima
+           del umbral: cada pasada de JPEG le quitaría un poco de nitidez */
+        var pesadas = todas.filter(function (f) {
+          return f && typeof f.imagen === 'string' && f.imagen.indexOf('data:image') === 0 &&
+                 f.imagen.length > UMBRAL && !f.imagenComprimida;
+        });
+        r.revisadas = pesadas.length;
+        /* de a una, para no llenar la memoria de un celular viejo */
+        return pesadas.reduce(function (p, f) {
+          return p.then(function () {
+            var original = f.imagen;
+            return comprimir(original).then(function (nueva) {
+              if (nueva.length >= original.length) return;
+              return guardarFoto(db, f.id, original, nueva).then(function (ok) {
+                if (!ok) return;
+                r.comprimidas++; r.antes += original.length; r.despues += nueva.length;
+              });
+            }).catch(function () { r.fallidas++; });    /* se queda la original */
+          });
+        }, Promise.resolve());
+      }).then(function () { db.close(); }, function (e) { db.close(); throw e; });
+    }).catch(function () {}).then(function () {
+      ultimo = r;
+      corriendo = null;
+      return r;
+    });
+    return corriendo;
+  }
+
+  /* ── Espacio ──────────────────────────────────────────────────────────── */
+  var espacio = null;   /* {usado, cupo, persistente} en bytes */
+  function medirEspacio() {
+    if (!navigator.storage || !navigator.storage.estimate) return Promise.resolve(null);
+    return Promise.all([
+      navigator.storage.estimate(),
+      navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false)
+    ]).then(function (x) {
+      espacio = { usado: x[0].usage || 0, cupo: x[0].quota || 0, persistente: !!x[1] };
+      return espacio;
+    }).catch(function () { return null; });
+  }
+  function pedirPersistente() {
+    try {
+      if (navigator.storage && navigator.storage.persist) return navigator.storage.persist().catch(function () { return false; });
+    } catch (e) {}
+    return Promise.resolve(false);
+  }
+  function textoEspacio() {
+    if (!espacio || !espacio.cupo) return '';
+    var mb = function (b) {
+      if (b >= 1073741824) return (b / 1073741824).toLocaleString('es-CO', { maximumFractionDigits: 1 }) + ' GB';
+      return (b / 1048576).toLocaleString('es-CO', { maximumFractionDigits: b < 10485760 ? 1 : 0 }) + ' MB';
+    };
+    return 'Espacio: la app usa ' + mb(espacio.usado) + ' de ' + mb(espacio.cupo) + ' disponibles' +
+           (espacio.persistente ? ' (protegido)' : '') + '.';
+  }
+
+  function arrancar() {
+    setTimeout(function () {
+      pedirPersistente().then(medirEspacio).then(function () {
+        try { if (window.DMSync) DMSync.pintar(); } catch (e) {}
+      });
+      comprimirPendientes().then(medirEspacio);
+    }, 8000);
+    setInterval(function () { comprimirPendientes(); }, CADA_MS);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arrancar);
+  else arrancar();
+
+  return {
+    comprimir: comprimir, comprimirPendientes: comprimirPendientes,
+    ultimo: function () { return ultimo; },
+    medirEspacio: medirEspacio, textoEspacio: textoEspacio,
+    ANCHO_MAX: ANCHO_MAX, CALIDAD: CALIDAD, UMBRAL: UMBRAL
+  };
+})();
+
+</script>
+<script>
 /* ===== HERRAMIENTAS AVANZADAS ===== */
 /* ═══════════════════════════════════════════════════════════════════════════
    DMAvanzadas — Recoge las herramientas de diagnóstico y las guarda en una
@@ -19603,6 +19878,7 @@ var DMDemo = (function () {
         </div>
         <div class="dm-row">
           <button class="dm-btn ghost" onclick="DMSync.revisarSincronizacion()">🔍 Revisar sincronización</button>
+          <button class="dm-btn ghost" onclick="DMSync.revisarSaldos()">📦 Revisar saldos</button>
         </div>
         <div class="dm-nota">
           «Enviar mi día» manda todo lo que registraste: remisiones, compras,
@@ -19612,7 +19888,9 @@ var DMDemo = (function () {
           «Enviar productos y precios» va del dueño al encargado y
           <strong>no lleva utilidad, costos ni márgenes</strong>.<br>
           «Revisar sincronización» vuelve a bajar de internet todo lo que mandó
-          el otro celular, desde el principio. No duplica nada.
+          el otro celular, desde el principio. No duplica nada.<br>
+          «Revisar saldos» compara el saldo de cada insumo con su historial y
+          dice cuántos movimientos tiene, para comparar los dos celulares.
         </div>
 
         <label>Histórico para analizar</label>
@@ -19652,7 +19930,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 01/10/2026 16:01</div>
+                margin-top:10px;opacity:.75">Versión del 01/10/2026 17:29</div>
   </div>
 </div>
 
