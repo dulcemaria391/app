@@ -14332,7 +14332,32 @@ var DMSync = (function () {
     catch (e) { return []; }
   }
   function escribirLS(clave, arr) {
-    try { localStorage.setItem(clave, JSON.stringify(arr)); } catch (e) {}
+    try { localStorage.setItem(clave, JSON.stringify(arr)); return true; }
+    catch (e) { anotarFalloGuardado(clave, e); return false; }
+  }
+
+  /* [1 oct 2026] Si el celular no puede guardar (casi siempre: sin espacio),
+     antes se tragaba el error y la unión «salía bien» sin guardar nada. Ahora
+     se anota, y unir() termina con un error que lo dice con todas las letras. */
+  var fallosGuardado = [];
+  function anotarFalloGuardado(donde, e) {
+    fallosGuardado.push({ donde: donde, error: (e && (e.name || e.message)) || 'error' });
+  }
+  function nombreLista(clave) {
+    var n = null;
+    LS_HECHOS.forEach(function (h) { if (h.clave === clave) n = h.area; });
+    return n || ({ obleas_inventario: 'saldos de insumos (obleas)', dm_ar_inv: 'saldos de insumos (arequipe)',
+                   dm_ar_prod: 'saldos de arequipe producido', idb: 'remisiones, plata y stock de ventas' })[clave] ||
+           nombreArea(clave);
+  }
+  function errorAlmacenamiento(fallos) {
+    var donde = [];
+    fallos.forEach(function (f) { var n = nombreLista(f.donde); if (donde.indexOf(n) < 0) donde.push(n); });
+    var err = new Error('El celular no pudo guardar ' + donde.join(', ') +
+      ' (' + fallos[0].error + '). Casi siempre es falta de espacio en el celular, no el internet.');
+    err.tipo = 'almacenamiento';
+    err.donde = donde;
+    return err;
   }
   function leerObj(clave) {
     try { var o = JSON.parse(localStorage.getItem(clave) || '{}'); return (o && typeof o === 'object') ? o : {}; }
@@ -14713,7 +14738,13 @@ var DMSync = (function () {
         }
 
         tx.oncomplete = function () { db.close(); res(); };
-        tx.onerror = function () { db.close(); res(); };
+        /* sin espacio, IndexedDB ABORTA la transacción: antes solo se
+           escuchaba onerror y la unión se podía quedar esperando para siempre */
+        tx.onerror = tx.onabort = function () {
+          anotarFalloGuardado('idb', tx.error);
+          try { db.close(); } catch (e) {}
+          res();
+        };
       };
     });
   }
@@ -14870,7 +14901,7 @@ var DMSync = (function () {
         }
         saldos[f.id][L.campo] = f.nuevo;
       });
-      try { localStorage.setItem(L.saldo, JSON.stringify(saldos)); } catch (e) {}
+      try { localStorage.setItem(L.saldo, JSON.stringify(saldos)); } catch (e) { anotarFalloGuardado(L.saldo, e); }
     });
   }
 
@@ -15021,7 +15052,11 @@ var DMSync = (function () {
           }
         }
         tx.oncomplete = function () { db.close(); res(); };
-        tx.onerror = function () { db.close(); res(); };
+        tx.onerror = tx.onabort = function () {
+          anotarFalloGuardado('idb', tx.error);
+          try { db.close(); } catch (e) {}
+          res();
+        };
       };
     });
   }
@@ -15031,6 +15066,7 @@ var DMSync = (function () {
     var informe = [];
     informe.avisos = [];
     informe._nuevosLS = {};
+    fallosGuardado = [];
 
     if (!paq || paq._formato !== 'dulce-maria-union') {
       return Promise.reject(new Error('Ese archivo no es un envío de la app. ' +
@@ -15054,6 +15090,7 @@ var DMSync = (function () {
       : unirIDB(paq, informe).then(function () { unirLS(paq, informe); });
 
     return trabajo.then(function () {
+      if (fallosGuardado.length) throw errorAlmacenamiento(fallosGuardado);
       try { localStorage.setItem(LS_ULTIMA, new Date().toISOString()); } catch (e) {}
       return informe;
     });
@@ -15111,8 +15148,14 @@ var DMSync = (function () {
       if (cn) partes.push('<br>Canal: <strong>' + cn.slice(0, 6) + '…' + cn.slice(-4) + '</strong>.');
       if (a && a.ts) {
         partes.push('<br>Sincronización automática: ' + fechaHora(a.ts) + ' · subió ' + num(a.subio) +
-          ' · bajó ' + num(a.bajo) + (a.completa ? ' (revisión completa)' : '') +
+          ' · bajó ' + num(a.bajo) +
           (a.estado && a.estado !== 'ok' ? ' · <span style="color:#B03020">' + a.estado + '</span>' : '') + '.');
+        /* [1 oct 2026] la revisión completa va por partes: cuánto lleva */
+        if (a.revision && !a.revision.terminada) {
+          partes.push('<br>Revisión completa en curso: ' + a.revision.listas + ' de ' + a.revision.total +
+            ' listas' + (a.revision.enCurso ? ', ahora ' + a.revision.enCurso : '') +
+            '. Sigue sola cada 90 s; lo ya bajado queda guardado.');
+        }
       }
       est.innerHTML = partes.join(' ');
     }
@@ -15144,8 +15187,23 @@ var DMSync = (function () {
     return A.revisarTodo().then(function (r) {
       pintar();
       if (!r) { alert('Ya se está sincronizando en este momento. Intenta de nuevo en un minuto.'); return r; }
-      if (r.estado !== 'ok') alert('No se pudo terminar la revisión (' + r.estado + '). Revisa la señal e intenta otra vez.');
-      else if (typeof toast === 'function') toast('🔍 Revisión completa: bajó ' + r.bajo + ' registro(s)', 'ok');
+      var rv = r.revision || {}, SALTO = '\n\n';
+      var avance = rv.total ? SALTO + 'Van ' + rv.listas + ' de ' + rv.total + ' listas' +
+        (rv.enCurso ? ' (ahora: ' + rv.enCurso + ')' : '') + '. Lo ya bajado quedó guardado.' : '';
+      /* [1 oct 2026] decir QUÉ falló y en qué paso, no siempre «el internet» */
+      if (r.tipo === 'almacenamiento') {
+        alert('⚠️ No es el internet: ' + r.estado + SALTO + 'Paso: ' + r.paso + '.' + avance +
+              SALTO + 'Libera espacio en el celular (fotos, videos, apps) y vuelve a intentar.');
+      } else if (r.tipo === 'tiempo') {
+        alert('La revisión no alcanzó a terminar a tiempo: se quedó ' + r.paso + '.' + avance +
+              SALTO + 'No hay que hacer nada: sigue sola cada 90 s desde donde quedó.');
+      } else if (r.tipo === 'red') {
+        alert('Falló la conexión ' + r.paso + '.' + avance + SALTO + 'Revisa la señal; sigue sola cuando vuelva.');
+      } else if (rv.terminada === false) {
+        alert('🔍 Revisión en curso: bajó ' + r.bajo + ' registro(s).' + avance + SALTO + 'Sigue sola cada 90 s.');
+      } else if (typeof toast === 'function') {
+        toast('🔍 Revisión completa: bajó ' + r.bajo + ' registro(s)', 'ok');
+      }
       return r;
     });
   }
@@ -15385,8 +15443,20 @@ var DMAutoSync = (function () {
   var CADA_MS = 90000;               /* cada cuánto revisa solo, con la app abierta */
   var TOPE_POR_VUELTA = 500;         /* registros por consulta; se pagina hasta traerlo todo */
   var MAX_PAGINAS = 400;             /* freno de seguridad: 400 × 500 = 200.000 registros */
-  var MARGEN_MS = 10 * 60 * 1000;    /* se relee lo de los últimos 10 min (lo repetido se descarta por llave) */
-  var LIMITE_MS = 60000;             /* una vuelta que tarde más se da por fallida */
+  var MARGEN_MS = 2 * 60 * 1000;     /* se relee lo de los últimos 2 min (lo repetido se descarta por llave);
+                                        t es la hora del servidor, no va hacia atrás: no hace falta más
+                                        (con 10 min, una remisión con foto se bajaba unas 6 veces) */
+  var LIMITE_MS = window.DM_PRUEBA_LIMITE_MS || 60000;  /* una vuelta que tarde más se da por fallida
+                                                         (las pruebas lo acortan para no esperar minutos) */
+  /* [1 oct 2026] La revisión completa va POR PARTES: el canal real pesa 24 MB
+     y 23 son fotos de remisiones; bajarlo todo de una vez no cabía en 60 s,
+     no guardaba nada y volvía a empezar de cero cada 90 s (gastando datos).
+     Ahora baja una lista a la vez (las livianas primero, las remisiones al
+     final y de a pocas), une y guarda el avance después de cada página. */
+  var LS_AVANCE = 'dm_auto_revision_avance';  /* {store: {k: última llave, n: cuántos, fin: bool}} */
+  var PAGINA_REVISION = { facturaai_facturas: 10 };   /* ~1,2 MB por página con las fotos */
+  var AL_FINAL = ['facturaai_facturas'];
+  var RESERVA_MS = LIMITE_MS / 4;    /* no empezar una página nueva si quedan menos de 15 s */
 
   var db = null;
   var iniciado = false;
@@ -15431,9 +15501,6 @@ var DMAutoSync = (function () {
       return (c && typeof c.t === 'number') ? c : null;
     } catch (e) { return null; }
   }
-  function ponerCursor(store, c) {
-    try { localStorage.setItem(LS_CURSOR_T + store, JSON.stringify(c)); } catch (e) {}
-  }
   function leerFlag(k) { try { return !!localStorage.getItem(k); } catch (e) { return false; } }
   function ponerFlag(k) { try { localStorage.setItem(k, new Date().toISOString()); } catch (e) {} }
   function guardarUltima(d) { try { localStorage.setItem(LS_ULTIMA_AUTO, JSON.stringify(d)); } catch (e) {} }
@@ -15469,25 +15536,29 @@ var DMAutoSync = (function () {
     });
   }
 
-  /* Baja de UN store. NO toca el cursor: solo devuelve lo traído y hasta
-     dónde llegó; el cursor se mueve en ciclo(), después de unir bien.
-     - completo: todo el canal por llave (incluye lo viejo sin «t»).
-     - si no: por (t, llave) desde el cursor menos MARGEN_MS. Se pagina con
-       startAt(t, llave): todo lo de un mismo update tiene el MISMO t, así que
-       paginar solo por t se saltaría o repetiría registros. */
-  function traerStore(c, store, completo) {
+  /* Baja lo NUEVO de UN store, por (t, llave) desde el cursor menos
+     MARGEN_MS. NO toca el cursor: solo devuelve lo traído y hasta dónde
+     llegó; el cursor se mueve en ciclo(), después de unir bien. Se pagina
+     con startAt(t, llave): todo lo de un mismo update tiene el MISMO t, así
+     que paginar solo por t se saltaría o repetiría registros. startAt(número)
+     deja fuera lo viejo sin «t» (null va antes que los números): eso lo
+     trae la revisión completa. */
+  function traerStore(c, store) {
     var base = db.ref('canales/' + c + '/indice/' + store);
     var cur = cursorDe(store);
     var regs = [], llaves = [], vistos = {}, fin = cur ? { t: cur.t, k: cur.k } : null;
+    var t0 = cur ? Math.max(0, cur.t - MARGEN_MS) : 0;
 
-    function pagina(consulta, ultimaK) {
-      return consulta.once('value').then(function (snap) {
+    function pagina(desde) {
+      var q = base.orderByChild('t');
+      q = (desde ? q.startAt(desde.t, desde.k) : q.startAt(t0)).limitToFirst(TOPE_POR_VUELTA);
+      return q.once('value').then(function (snap) {
         var crudos = 0, ult = null;
         snap.forEach(function (hijo) {
           crudos++;
           var v = hijo.val();
           ult = { k: hijo.key, t: v && v.t };
-          if (hijo.key === ultimaK || vistos[hijo.key]) return;   /* el de arranque de la página */
+          if ((desde && hijo.key === desde.k) || vistos[hijo.key]) return;   /* el de arranque de la página */
           vistos[hijo.key] = true;
           if (!v || !v.r) return;
           regs.push(v.r);
@@ -15497,36 +15568,109 @@ var DMAutoSync = (function () {
         return { crudos: crudos, ult: ult };
       });
     }
-    function seguir(n, consultaDe, desde) {
+    function seguir(n, desde) {
       if (n >= MAX_PAGINAS) return Promise.reject(new Error('demasiadas páginas en ' + store));
-      return pagina(consultaDe(desde), desde && desde.k).then(function (p) {
+      return pagina(desde).then(function (p) {
         if (p.crudos < TOPE_POR_VUELTA || !p.ult) return;
-        return seguir(n + 1, consultaDe, p.ult);
+        return seguir(n + 1, p.ult);
       });
     }
+    return seguir(0, null).then(function () { return { store: store, regs: regs, llaves: llaves, fin: fin }; });
+  }
 
-    var hecho;
-    if (completo) {
-      hecho = seguir(0, function (d) {
-        var q = base.orderByKey();
-        return (d ? q.startAt(d.k) : q).limitToFirst(TOPE_POR_VUELTA);
-      }, null);
-    } else {
-      /* startAt(número) deja fuera lo viejo sin «t» (null va antes que los números) */
-      var t0 = cur ? Math.max(0, cur.t - MARGEN_MS) : 0;
-      hecho = seguir(0, function (d) {
-        var q = base.orderByChild('t');
-        return (d ? q.startAt(d.t, d.k) : q.startAt(t0)).limitToFirst(TOPE_POR_VUELTA);
-      }, null);
+  /* ── Revisión completa, por partes ────────────────────────────────────── */
+  function avance() {
+    try { return JSON.parse(localStorage.getItem(LS_AVANCE) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function guardarOFallar(k, v) {     /* como localStorage.setItem, pero si no cabe lo dice */
+    try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }
+    catch (e) {
+      var err = new Error('El celular no pudo guardar el avance de la sincronización (' + (e.name || e.message) +
+                          '). Casi siempre es falta de espacio en el celular, no el internet.');
+      err.tipo = 'almacenamiento';
+      throw err;
     }
-    return hecho.then(function () { return { store: store, regs: regs, llaves: llaves, fin: fin }; });
+  }
+  function ordenRevision(stores) {
+    return stores.filter(function (s) { return AL_FINAL.indexOf(s) < 0; })
+      .concat(stores.filter(function (s) { return AL_FINAL.indexOf(s) >= 0; }));
+  }
+  function resumenRevision(stores) {
+    var av = avance(), listas = 0, faltan = [];
+    stores.forEach(function (s) { if (av[s] && av[s].fin) listas++; else faltan.push(s); });
+    return { listas: listas, total: stores.length, faltan: faltan, av: av };
+  }
+
+  /* Baja UNA página de un store por llave (incluye lo viejo sin «t»), la une
+     y guarda el avance. Devuelve {n, fin}. */
+  function revisarPagina(c, store, vuelta) {
+    var av = avance(), a = av[store] || { k: null, n: 0, fin: false };
+    var tam = PAGINA_REVISION[store] || TOPE_POR_VUELTA;
+    var q = db.ref('canales/' + c + '/indice/' + store).orderByKey();
+    q = (a.k ? q.startAt(a.k) : q).limitToFirst(tam + (a.k ? 1 : 0));
+    vuelta.paso = 'bajando ' + nombreDe(store) + (a.n ? ' (van ' + a.n + ')' : '');
+    return q.once('value').then(function (snap) {
+      var regs = [], llaves = [], crudos = 0, ult = a.k;
+      snap.forEach(function (hijo) {
+        crudos++;
+        if (hijo.key === a.k) return;                 /* la última de la página anterior */
+        ult = hijo.key;
+        var v = hijo.val();
+        if (!v || !v.r) return;
+        regs.push(v.r);
+        if (v.k) llaves.push(v.k);
+      });
+      if (vuelta.vencida) throw new Error('tiempo');
+      var terminado = crudos < tam + (a.k ? 1 : 0);
+      vuelta.paso = 'guardando ' + nombreDe(store);
+      var unido = !regs.length ? Promise.resolve(null) : DMSync.unir(paquete(store, regs));
+      return unido.then(function (informe) {
+        if (vuelta.vencida) throw new Error('tiempo');
+        var nuevo = avance();
+        nuevo[store] = { k: ult, n: a.n + regs.length, fin: terminado };
+        guardarOFallar(LS_AVANCE, nuevo);
+        marcarLlaves(store, llaves);
+        if (informe && informe.length) vuelta.nuevos = true;
+        return { n: regs.length, fin: terminado };
+      });
+    });
+  }
+
+  function paquete(store, regs) {
+    var idb = {}, ls = {};
+    if (DMSync.esHechoIDB(store)) idb[store] = regs; else ls[store] = regs;
+    return { _formato: 'dulce-maria-union', _version: 1, _tipo: 'dia',
+             _aparato: 'internet', _generado: new Date().toISOString(), idb: idb, ls: ls };
+  }
+  function marcarLlaves(store, llaves) {
+    /* lo que bajó ya está en internet: no volver a subirlo desde aquí */
+    if (!llaves.length) return;
+    var ya = pusheados(store);
+    llaves.forEach(function (k) { ya[k] = true; });
+    guardarOFallar(LS_PUSHEADOS + store, ya);
+  }
+  function nombreDe(store) {
+    return ({
+      facturaai_facturas: 'remisiones (con fotos)', facturaai_movimientos: 'movimientos de stock de ventas',
+      facturaai_finanzas: 'registros de plata', facturaai_cierres: 'cierres',
+      obleas_turnos: 'turnos de obleas', dm_ar_regs: 'lotes de arequipe',
+      obleas_inv_movimientos: 'compras y consumos de insumos (obleas)',
+      dm_ar_mov: 'compras y consumos de insumos (arequipe)', dm_ar_prod_mov: 'arequipe producido',
+      dm_prestamos: 'préstamos', obleas_nom_historial: 'nómina de obleas', dm_ar_nom_per: 'nómina de arequipe',
+      obleas_costo_historial: 'historial de costos', dm_proveedores: 'proveedores', dm_borrados: 'borrados'
+    })[store] || store;
   }
 
   var numVuelta = 0;
 
-  /* Una vuelta: subir, bajar, unir y, SOLO si todo salió bien y a tiempo,
-     mover los cursores. completo = bajar todo el canal desde el principio
-     (la primera vez con este código, y el botón «Revisar sincronización»). */
+  /* Una vuelta:
+     1. subir lo propio;
+     2. bajar lo NUEVO (por t) de todas las listas, unir y, solo si salió bien,
+        mover los cursores;
+     3. si la revisión completa no ha terminado, seguirla por partes con el
+        tiempo que quede (cada página que se une queda guardada).
+     completo === true (botón «Revisar sincronización»): empieza la revisión
+     completa desde cero. */
   function ciclo(completo) {
     if (sincronizando) return Promise.resolve(null);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return Promise.resolve(null);
@@ -15537,57 +15681,85 @@ var DMAutoSync = (function () {
     if (!init()) return Promise.resolve(null);
 
     sincronizando = true;
-    var vuelta = ++numVuelta, vencida = false;
-    var todo = completo === true || !leerFlag(LS_REVISION);
+    var inicio = Date.now();
+    var vuelta = { id: ++numVuelta, vencida: false, paso: 'subiendo', nuevos: false };
     var stores = DMSync.todosLosHechos();
-    var res = { ts: new Date().toISOString(), subio: 0, bajo: 0, estado: 'ok', completa: todo };
+    var res = { ts: new Date().toISOString(), subio: 0, bajo: 0, estado: 'ok', tipo: null, paso: '', completa: false };
+
+    if (completo === true) {
+      try { localStorage.removeItem(LS_AVANCE); localStorage.removeItem(LS_REVISION); } catch (e) {}
+    }
 
     var trabajo = Promise.all(stores.map(function (s) {
       return empujarStore(c, s).catch(function () { res.estado = 'no pudo subir todo'; return 0; });
     })).then(function (subidos) {
       res.subio = subidos.reduce(function (a, b) { return a + b; }, 0);
-      return Promise.all(stores.map(function (s) { return traerStore(c, s, todo); }));
+      if (vuelta.vencida) throw new Error('tiempo');
+      vuelta.paso = 'bajando lo nuevo';
+      return Promise.all(stores.map(function (s) { return traerStore(c, s); }));
     }).then(function (traidos) {
-      if (vencida) throw new Error('tiempo');
+      if (vuelta.vencida) throw new Error('tiempo');
       var paqIDB = {}, paqLS = {};
       traidos.forEach(function (x) {
         res.bajo += x.regs.length;
         if (!x.regs.length) return;
         if (DMSync.esHechoIDB(x.store)) paqIDB[x.store] = x.regs; else paqLS[x.store] = x.regs;
       });
+      vuelta.paso = 'guardando lo nuevo';
       var unido = !res.bajo ? Promise.resolve(null) : DMSync.unir({
         _formato: 'dulce-maria-union', _version: 1, _tipo: 'dia',
         _aparato: 'internet', _generado: new Date().toISOString(),
         idb: paqIDB, ls: paqLS
       });
       return unido.then(function (informe) {
-        if (vencida) throw new Error('tiempo');
+        if (vuelta.vencida) throw new Error('tiempo');
         traidos.forEach(function (x) {
-          if (x.fin) ponerCursor(x.store, x.fin);
-          /* lo que bajó ya está en internet: no volver a subirlo desde aquí
-             (antes cada celular resubía todo lo del otro) */
-          if (x.llaves.length) {
-            var ya = pusheados(x.store);
-            x.llaves.forEach(function (k) { ya[k] = true; });
-            marcarPusheados(x.store, ya);
-          }
+          if (x.fin) guardarOFallar(LS_CURSOR_T + x.store, x.fin);
+          marcarLlaves(x.store, x.llaves);
         });
-        if (todo) ponerFlag(LS_REVISION);
-        if (informe && informe.length && typeof toast === 'function') {
-          toast('🔄 Se puso al día con el otro celular', 'ok');
-        }
+        if (informe && informe.length) vuelta.nuevos = true;
       });
+    }).then(function () {
+      /* 3. revisión completa por partes, con el tiempo que quede */
+      if (leerFlag(LS_REVISION)) return;
+      res.completa = true;
+      var orden = ordenRevision(stores);
+      function siguiente() {
+        if (vuelta.vencida) throw new Error('tiempo');
+        var r = resumenRevision(orden);
+        if (!r.faltan.length) { guardarOFallar(LS_REVISION, new Date().toISOString()); return; }
+        if (Date.now() - inicio > LIMITE_MS - RESERVA_MS) return;    /* sigue en la próxima vuelta */
+        return revisarPagina(c, r.faltan[0], vuelta).then(function (p) { res.bajo += p.n; return siguiente(); });
+      }
+      return siguiente();
+    }).then(function () {
+      if (vuelta.nuevos && typeof toast === 'function') toast('🔄 Se puso al día con el otro celular', 'ok');
     });
 
     var reloj = new Promise(function (ok) {
-      setTimeout(function () { vencida = true; ok('tiempo'); }, LIMITE_MS);
+      setTimeout(function () { ok({ tiempo: true }); }, LIMITE_MS);
     });
-    return Promise.race([trabajo.then(function () { return 'ok'; }), reloj])
-      .catch(function (e) { return (e && e.message === 'tiempo') ? 'tiempo' : 'error'; })
+    return Promise.race([trabajo.then(function () { return {}; }), reloj])
+      .catch(function (e) { return { error: e || new Error('error') }; })
       .then(function (r) {
-        if (vuelta !== numVuelta) return null;       /* una vuelta vieja que terminó tarde */
-        if (r === 'tiempo') { vencida = true; res.estado = 'se pasó de ' + (LIMITE_MS / 1000) + ' s — se reintenta'; }
-        else if (r === 'error') { vencida = true; res.estado = 'falló — se reintenta'; }
+        if (vuelta.id !== numVuelta) return null;       /* una vuelta vieja que terminó tarde */
+        var donde = vuelta.paso;
+        if (r.tiempo) {
+          vuelta.vencida = true;
+          res.tipo = 'tiempo';
+          res.estado = 'se pasó de ' + (LIMITE_MS / 1000) + ' s ' + donde;
+        } else if (r.error) {
+          vuelta.vencida = true;
+          if (r.error.tipo === 'almacenamiento') { res.tipo = 'almacenamiento'; res.estado = r.error.message; }
+          else if (r.error.message === 'tiempo') { res.tipo = 'tiempo'; res.estado = 'se pasó de ' + (LIMITE_MS / 1000) + ' s ' + donde; }
+          else { res.tipo = 'red'; res.estado = 'falló la conexión ' + donde; }
+        }
+        res.paso = donde;
+        if (res.completa) {
+          var rr = resumenRevision(ordenRevision(stores));
+          res.revision = { listas: rr.listas, total: rr.total, terminada: leerFlag(LS_REVISION),
+                           enCurso: rr.faltan.length ? nombreDe(rr.faltan[0]) + ((rr.av[rr.faltan[0]] || {}).n ? ' (van ' + rr.av[rr.faltan[0]].n + ')' : '') : '' };
+        }
         guardarUltima(res);
         sincronizando = false;
         try { DMSync.pintar(); } catch (e) {}
@@ -19480,7 +19652,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 30/09/2026 18:03</div>
+                margin-top:10px;opacity:.75">Versión del 01/10/2026 16:01</div>
   </div>
 </div>
 
