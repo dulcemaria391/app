@@ -2698,7 +2698,8 @@ function dbW(fn){
     },
     put:function(reg){
       var idx=arr.findIndex(function(r){return r.id===reg.id;});
-      if(idx>=0)arr[idx]=reg;else arr.push(reg);
+      if(idx>=0){ try{ if(window.DMSync&&DMSync.nuevaVersion) DMSync.nuevaVersion('obleas_turnos',arr[idx],reg); }catch(e){} arr[idx]=reg; }
+      else arr.push(reg);
       saveTurnos(arr);
       return{result:reg.id};
     },
@@ -14205,6 +14206,37 @@ var DMSync = (function () {
     if (num(a && (a.editado || a.editada)) === vb) return true;
     return ((a && (a.ancestros || a.editadaAncestros)) || []).indexOf(vb) >= 0;
   }
+  /* [1 oct 2026, corrección] Obleas ya usaba «editado» como MARCA al corregir
+     un turno (editado: true + editadoTs, PARCHE de build.py). Por eso:
+     - versionDe(r) es el número para comparar versiones: editado si es un
+       número (versión de este código), la hora de editadoTs si es la marca
+       de Obleas, y 0 si no tiene.
+     - La llave NO cambia (base + '@' + editado tal cual): lo que ya se subió
+       con '@true' no se vuelve a subir.
+     - Solo hay conflicto si las DOS versiones traen su historia (ancestros:
+       las hizo este código), ninguna viene de la otra y el contenido es
+       distinto. Versiones viejas o iguales: gana la más nueva, sin aviso. */
+  function versionDe(r) {
+    if (!r) return 0;
+    if (typeof r.editado === 'number') return r.editado;
+    if (r.editado === true) return Date.parse(r.editadoTs || '') || 1;
+    return num(r.editada);
+  }
+  function tieneHistoria(r) { return !!r && Array.isArray(r.ancestros || r.editadaAncestros); }
+  var NO_ES_CONTENIDO = { editado: 1, ancestros: 1, editadoEn: 1, idOriginal: 1, editadoTs: 1, editada: 1,
+                          editadaAncestros: 1, t: 1, imagen: 1, imagenComprimida: 1 };
+  function mismoContenido(a, b) {
+    var ka = Object.keys(a || {}).filter(function (k) { return !NO_ES_CONTENIDO[k]; });
+    var kb = Object.keys(b || {}).filter(function (k) { return !NO_ES_CONTENIDO[k]; });
+    if (ka.length !== kb.length) return false;
+    return ka.every(function (k) { return JSON.stringify(a[k]) === JSON.stringify(b[k]); });
+  }
+  function esConflicto(a, b) {
+    return tieneHistoria(a) && tieneHistoria(b) && !vieneDe(a, b) && !vieneDe(b, a) && !mismoContenido(a, b);
+  }
+  /* «la de Planta» / «la del otro celular» */
+  function laDe(x) { return x && x.editadoEn ? 'la de ' + x.editadoEn : 'la del otro celular'; }
+
   /* lápidas: base → hora del borrado (ms); si hay varias, la más nueva */
   function mapaMuertos(lista) {
     var m = {};
@@ -14371,7 +14403,7 @@ var DMSync = (function () {
       var arr = leerLS(h.clave), fechas = {};
       var quedan = arr.filter(function (r) {
         var b; try { b = h.base(r); } catch (e) { return true; }
-        if (!estaMuerto(muertos, b, r && r.editado)) {
+        if (!estaMuerto(muertos, b, versionDe(r))) {
           /* corregido DESPUÉS del borrado del otro celular: sobrevive, y se avisa aquí también */
           if ((b in muertos) && informe) (informe.conflictos = informe.conflictos || []).push(avisoBorradoCorregido(h.clave, b, r));
           return true;
@@ -14436,6 +14468,7 @@ var DMSync = (function () {
     return (h ? h.area : 'un registro') + (f ? ' del ' + f : '');
   }
   function hora(ms) {
+    if (!(num(ms) > 1e12)) return 'sin hora';
     var d = new Date(num(ms));
     return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' +
            ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
@@ -14443,14 +14476,14 @@ var DMSync = (function () {
   function textoConflicto(que, gana, pierde, resumen) {
     var r = resumen || function () { return ''; };
     return '⚠️ ' + que.charAt(0).toUpperCase() + que.slice(1) + ' se corrigió en los dos celulares. ' +
-      'Quedó la corrección de ' + (gana.editadoEn || 'el otro celular') + ' (' + hora(gana.editado || gana.editada) + r(gana) + '). ' +
-      'Se descartó la de ' + (pierde.editadoEn || 'el otro celular') + ' (' + hora(pierde.editado || pierde.editada) + r(pierde) + ').';
+      'Quedó ' + laDe(gana) + ' (' + hora(versionDe(gana)) + r(gana) + '). ' +
+      'Se descartó ' + laDe(pierde) + ' (' + hora(versionDe(pierde)) + r(pierde) + ').';
   }
   function avisoBorradoCorregido(clave, base, r) {
-    return { id: 'BC' + base + '@' + r.editado,
+    return { id: 'BC' + base + '@' + versionDe(r),
              texto: '⚠️ ' + describir(clave, r).replace(/^./, function (c) { return c.toUpperCase(); }) +
-               ' se borró en un celular y se corrigió después en el otro: quedó la corrección de ' +
-               (r.editadoEn || 'el otro celular') + ' (' + hora(r.editado) + ').' };
+               ' se borró en un celular y se corrigió después en el otro: quedó ' + laDe(r).replace(/^la /, 'la corrección ') +
+               ' (' + hora(versionDe(r)) + ').' };
   }
   function resumenDe(clave) {
     return function (r) {
@@ -14750,14 +14783,17 @@ var DMSync = (function () {
             if (s === 'facturaai_facturas') {
               var editadas = 0;
               informe.conflictos = informe.conflictos || [];
+              var avisadaF = {};
               (entra[s] || []).slice().sort(function (a, b) { return num(a && a.editada) - num(b && b.editada); })
                 .forEach(function (r) {
                   var mia = r && vistos[r.id];
                   if (!mia || num(r.editada) === num(mia.editada)) return;
-                  /* [1 oct 2026] corregida en los dos celulares: gana la más reciente, con aviso */
-                  if (!vieneDe(r, mia) && !vieneDe(mia, r)) {
+                  /* [1 oct 2026] corregida en los dos celulares: gana la más reciente, con aviso
+                     (solo si de verdad hay dos correcciones distintas; una vez por remisión) */
+                  if (!avisadaF[r.id] && esConflicto(r, mia)) {
+                    avisadaF[r.id] = true;
                     var gana = num(r.editada) > num(mia.editada) ? r : mia, pierde = gana === r ? mia : r;
-                    informe.conflictos.push({ id: 'CF' + r.id + '@' + gana.editada + '/' + pierde.editada,
+                    informe.conflictos.push({ id: 'CF' + r.id + '@' + gana.editada,
                       texto: textoConflicto('la remisión ' + (r.numero_factura || r.id), gana, pierde, function (x) {
                         return ' · total $' + Math.round(num(x.total)).toLocaleString('es-CO'); }) });
                   }
@@ -14971,28 +15007,34 @@ var DMSync = (function () {
       if (!suyos.length) return;
       var lista = leerLS(h.clave), pos = {};
       lista.forEach(function (r, i) { try { pos[h.base(r)] = i; } catch (e) {} });
-      var nuevos = [], corregidos = 0, esLapida = h.clave === 'dm_borrados';
+      var nuevos = [], corregidos = 0, esLapida = h.clave === 'dm_borrados', avisado = {}, fechasCorr = {};
       /* de la versión más vieja a la más nueva: así gana la última */
-      suyos.slice().sort(function (a, b) { return num(a.editado) - num(b.editado); }).forEach(function (r) {
+      suyos.slice().sort(function (a, b) { return versionDe(a) - versionDe(b); }).forEach(function (r) {
         var b; try { b = h.base(r); } catch (e) { return; }
-        if (!esLapida && estaMuerto(muertos, b, r.editado)) return;   /* borrado: una copia vieja no revive */
+        if (!esLapida && estaMuerto(muertos, b, versionDe(r))) return;   /* borrado: una copia vieja no revive */
         var i = pos[b];
-        if (i != null && num(r.editado) === num(lista[i].editado)) return;   /* la misma versión: nada que hacer */
-        if (!esLapida && (b in muertos)) informe.conflictos.push(avisoBorradoCorregido(h.clave, b, r));
+        if (i != null && versionDe(r) === versionDe(lista[i])) return;   /* la misma versión: nada que hacer */
+        if (!esLapida && (b in muertos) && !avisado[b]) { avisado[b] = true; informe.conflictos.push(avisoBorradoCorregido(h.clave, b, r)); }
         if (i == null) {
           pos[b] = lista.length; lista.push(r); nuevos.push(r); tocar(tocados, h.clave, r);
           return;
         }
         var mio = lista[i];
-        if (num(r.editado) === num(mio.editado)) return;           /* la misma versión */
-        var conflicto = !esLapida && !vieneDe(r, mio) && !vieneDe(mio, r);
-        var gana = num(r.editado) > num(mio.editado) ? r : mio, pierde = gana === r ? mio : r;
-        if (gana === r) { lista[i] = r; corregidos++; tocar(tocados, h.clave, mio); tocar(tocados, h.clave, r); }
-        if (conflicto) {
-          informe.conflictos.push({ id: 'C' + b + '@' + gana.editado + '/' + pierde.editado,
+        var gana = versionDe(r) > versionDe(mio) ? r : mio, pierde = gana === r ? mio : r;
+        if (gana === r) {
+          lista[i] = r; corregidos++; tocar(tocados, h.clave, mio); tocar(tocados, h.clave, r);
+          if (r.fecha) fechasCorr[String(r.fecha).slice(0, 10)] = 1;
+        }
+        if (!esLapida && !avisado[b] && esConflicto(r, mio)) {
+          avisado[b] = true;
+          informe.conflictos.push({ id: 'C' + b + '@' + versionDe(gana),
             texto: textoConflicto(describir(h.clave, gana), gana, pierde, resumenDe(h.clave)) });
         }
       });
+      /* un turno corregido en el otro celular: su costo del día se vuelve a guardar */
+      if (h.clave === 'obleas_turnos' && Object.keys(fechasCorr).length) {
+        try { if (typeof window.autoGuardarCostoFechas === 'function') window.autoGuardarCostoFechas(Object.keys(fechasCorr)); } catch (e) {}
+      }
       if (!nuevos.length && !corregidos) return;
       escribirLS(h.clave, ordenar(h.clave, lista));
       if (nuevos.length) informe.push(nuevos.length + ' ' + h.area);
@@ -20284,7 +20326,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 01/10/2026 18:18</div>
+                margin-top:10px;opacity:.75">Versión del 01/10/2026 22:33</div>
   </div>
 </div>
 
