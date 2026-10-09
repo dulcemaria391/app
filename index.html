@@ -3514,7 +3514,8 @@ function limpiarManual(){
   buildMasas();
   buildChecklist();
   var ef=document.getElementById('e-fecha');
-  if(ef)ef.value=new Date().toISOString().slice(0,10);
+  /* [8 oct 2026] fecha local (Colombia), no UTC: de noche ya daba «mañana» */
+  if(ef){var dHoy=new Date();ef.value=dHoy.getFullYear()+'-'+String(dHoy.getMonth()+1).padStart(2,'0')+'-'+String(dHoy.getDate()).padStart(2,'0');}
   sumMasas();
 }
 
@@ -13344,8 +13345,14 @@ var DMNomina = (function () {
   var K_CORTE = 'dm_nomina_corte';
   var LINEAS = { obleas: 'Obleas', arequipe: 'Arequipe' };
 
-  function hoyISO2() { return new Date().toISOString().slice(0, 10); }
-  function masUnDia(f) { var d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
+  /* [8 oct 2026] Fecha LOCAL del celular (Colombia), no UTC: con
+     toISOString(), desde las 7 p. m. ya era «mañana» y el corte del pago
+     quedaba un día después (se perdía el turno de ese día). */
+  function isoLocal(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function hoyISO2() { return isoLocal(new Date()); }
+  function masUnDia(f) { var d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + 1); return isoLocal(d); }
   function pesos2(v) { return '$' + Math.round(Number(v) || 0).toLocaleString('es-CO'); }
 
   /* [24 sep 2026] El corte guardado vive solo en ESTE celular: cuando la
@@ -13381,9 +13388,25 @@ var DMNomina = (function () {
     try { localStorage.setItem(K_CORTE, JSON.stringify(c)); } catch (e) {}
   }
 
+  /* [8 oct 2026] Fecha inicial puesta a mano por la dueña (tarjeta de
+     Nómina, «Turnos desde»). Manda sobre el corte hasta el próximo pago, que
+     la borra. Vive solo en este celular. */
+  var K_INICIO = 'dm_nomina_inicio';
+  function inicios() {
+    try { return JSON.parse(localStorage.getItem(K_INICIO) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function ponerInicio(linea, fecha) {
+    var i = inicios();
+    if (esFecha(fecha)) i[linea] = fecha; else delete i[linea];
+    try { localStorage.setItem(K_INICIO, JSON.stringify(i)); } catch (e) {}
+    pintar();
+  }
+
   /* El período abierto: desde el día siguiente al último pagado hasta hoy.
      Si nunca se ha liquidado, desde el primer turno registrado. */
   function periodo(linea) {
+    var m = inicios()[linea];
+    if (esFecha(m)) return { ini: m, fin: hoyISO2(), desdeCorte: true, manual: true };
     var c = cortes()[linea];
     if (c) return { ini: masUnDia(c), fin: hoyISO2(), desdeCorte: true };
     var fechas = registros(linea).map(function (r) { return normalizarFecha(r.fecha); }).filter(Boolean).sort();
@@ -13522,6 +13545,13 @@ var DMNomina = (function () {
   function liquidar(linea, cuenta) {
     var r = calcular(linea);
     if (!r.turnos) { avisarNom('No hay turnos por pagar en este período.', 'warn'); return Promise.resolve(null); }
+    /* [8 oct 2026] lo pagado llega hasta el ÚLTIMO DÍA CON TURNOS, no hasta
+       el día en que se pulsa «Pagar»: un turno de ese día o de los días
+       entre ese y el pago, registrado después, entra en la próxima nómina */
+    var ult = registros(linea).map(function (x) { return normalizarFecha(x.fecha); })
+      .filter(function (f) { return f >= r.periodo.ini && f <= r.periodo.fin; }).sort().pop();
+    if (ult) r.periodo = { ini: r.periodo.ini, fin: ult, desdeCorte: r.periodo.desdeCorte };
+    var fechaPago = hoyISO2();
     var etiqueta = LINEAS[linea] || linea;
     if (!confirm('¿Pagar la nómina de ' + etiqueta + '?\n\n' +
                  r.periodo.ini + ' → ' + r.periodo.fin + '\n' +
@@ -13539,7 +13569,7 @@ var DMNomina = (function () {
       cuenta: cuenta || 'caja', tipo: 'egreso', clase: 'produccion',
       /* lo que sale de caja es el neto MENOS los préstamos descontados:
          esa plata ya salió el día que se prestó */
-      categoria: 'Mano de obra', monto: pagoEfectivo(r), fecha: r.periodo.fin,
+      categoria: 'Mano de obra', monto: pagoEfectivo(r), fecha: fechaPago,
       facturaId: null, banco: null, cliente: null,
       ref: 'Nómina ' + etiqueta + ' · ' + r.periodo.ini + ' a ' + r.periodo.fin +
            ' · ' + r.turnos + ' turnos', ts: Date.now()
@@ -13554,7 +13584,7 @@ var DMNomina = (function () {
         var h = leerJSON('obleas_nom_historial', []);
         h.unshift({
           id: 'NO' + Date.now(),   /* llave propia para que viaje al otro celular */
-          desde: r.periodo.ini, hasta: r.periodo.fin, ts: new Date().toISOString(),
+          desde: r.periodo.ini, hasta: r.periodo.fin, ts: new Date().toISOString(), fechaPago: fechaPago,
           turnos: r.turnos, bruto: r.bruto, bono: r.bono, neto: r.neto,
           resumen: resumenHTML(r)
         });
@@ -13570,7 +13600,7 @@ var DMNomina = (function () {
         p.unshift({
           id: Date.now(), fechaIni: r.periodo.ini, fechaFin: r.periodo.fin,
           turnos: r.turnos, angel: ang.neto, tony: ton.neto, total: r.neto,
-          fechaPago: hoyISO2()
+          fechaPago: fechaPago
         });
         escribirJSON('dm_ar_nom_per', p);
         /* el bono de Ángel también se guarda aparte, igual que en Obleas
@@ -13586,13 +13616,15 @@ var DMNomina = (function () {
       if (window.DMPrestamos) {
         r.gente.forEach(function (w) {
           if (w.descuento > 0) {
-            DMPrestamos.abonar(w.nombre, w.descuento, r.periodo.fin,
+            DMPrestamos.abonar(w.nombre, w.descuento, fechaPago,
               'Descuento de nómina ' + r.periodo.ini + ' a ' + r.periodo.fin);
           }
         });
         DMPrestamos.pintar();
       }
       guardarCorte(linea, r.periodo.fin);   /* ← aquí se reinicia el conteo */
+      var ini = inicios(); delete ini[linea];   /* la fecha puesta a mano ya se usó */
+      try { localStorage.setItem(K_INICIO, JSON.stringify(ini)); } catch (e) {}
       pintar();
       try { if (typeof vt_renderInicio === 'function') vt_renderInicio(); } catch (e) {}
       avisarNom('Nómina de ' + etiqueta + ' pagada: ' + pesos2(pagoEfectivo(r)) +
@@ -13652,6 +13684,7 @@ var DMNomina = (function () {
             : r.periodo.ini + ' → ' + r.periodo.fin + ' · <strong>' + r.turnos + '</strong> turno(s)' +
               (r.periodo.desdeCorte ? '' : ' · sin corte previo')) +
         '</div>' +
+        htmlInicio(linea, r) +
         (r.gente.length
           ? '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:11.5px">' +
             '<thead><tr style="color:var(--dm-gris)">' +
@@ -13675,10 +13708,104 @@ var DMNomina = (function () {
           ? '<button class="dm-btn prim" style="margin-top:10px;width:100%" ' +
             'onclick="DMNomina.liquidar(\'' + linea + '\')">💵 Pagar y reiniciar conteo</button>'
           : '') +
+        htmlPagados(linea) +
         '</div>';
     });
     caja.innerHTML = html;
   }
+
+  /* [8 oct 2026] «Turnos desde»: la dueña puede fijar a mano la fecha en
+     que arranca el período abierto (p. ej. si el corte quedó mal). */
+  function htmlInicio(linea, r) {
+    var c = cortes()[linea];
+    var manual = !!r.periodo.manual;
+    var aviso = manual && c && r.periodo.ini <= c
+      ? '<div style="font-size:11px;color:#B03020;margin-top:3px">Ojo: el último pago llegó hasta el ' + c +
+        '; los turnos hasta ese día pueden quedar pagados dos veces.</div>'
+      : '';
+    return '<div style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11.5px;flex-wrap:wrap">' +
+      '<label style="color:var(--dm-gris)">Turnos desde</label>' +
+      '<input type="date" value="' + r.periodo.ini + '" ' +
+        'onchange="DMNomina.ponerInicio(\'' + linea + '\', this.value)" ' +
+        'style="font-size:12px;padding:3px 6px;border:1px solid var(--dm-crema2);border-radius:6px">' +
+      (manual
+        ? '<button class="dm-btn ghost" style="padding:3px 8px;font-size:11px" ' +
+          'onclick="DMNomina.ponerInicio(\'' + linea + '\', \'\')">↺ Usar el último pago' +
+          (c ? ' (' + masUnDia(c) + ')' : '') + '</button>'
+        : '') +
+      '</div>' + aviso;
+  }
+
+  /* Períodos ya pagados, del más nuevo al más viejo */
+  function pagados(linea) {
+    var lista = linea === 'obleas'
+      ? leerJSON('obleas_nom_historial', []).filter(function (h) { return h && esFecha(h.desde) && esFecha(h.hasta); })
+          .map(function (h) {
+            return { desde: h.desde, hasta: h.hasta, turnos: h.turnos, total: h.neto,
+                     pago: h.fechaPago || String(h.ts || '').slice(0, 10) };
+          })
+      : leerJSON('dm_ar_nom_per', []).filter(function (p) { return p && esFecha(p.fechaIni) && esFecha(p.fechaFin); })
+          .map(function (p) {
+            return { desde: p.fechaIni, hasta: p.fechaFin, turnos: p.turnos, total: p.total, pago: p.fechaPago || '' };
+          });
+    return lista.sort(function (a, b) { return a.hasta < b.hasta ? 1 : a.hasta > b.hasta ? -1 : 0; });
+  }
+  function htmlPagados(linea) {
+    var lista = pagados(linea);
+    if (!lista.length) return '';
+    return '<details style="margin-top:8px;font-size:11.5px">' +
+      '<summary style="cursor:pointer;color:var(--dm-gris)">📜 Períodos pagados (' + lista.length + ')</summary>' +
+      '<table style="width:100%;border-collapse:collapse;margin-top:6px">' +
+      '<thead><tr style="color:var(--dm-gris)">' +
+        '<th style="text-align:left;padding:3px 6px 5px 0;font-weight:600">Período</th>' +
+        '<th style="text-align:center;padding:3px 6px 5px;font-weight:600">Turnos</th>' +
+        '<th style="text-align:right;padding:3px 6px 5px;font-weight:600">Total</th>' +
+        '<th style="text-align:right;padding:3px 0 5px 6px;font-weight:600">Pagado</th>' +
+      '</tr></thead><tbody>' +
+      lista.map(function (p) {
+        return '<tr style="border-top:1px solid var(--dm-crema2)">' +
+          '<td style="padding:4px 6px 4px 0">' + p.desde + ' → ' + p.hasta + '</td>' +
+          '<td style="padding:4px 6px;text-align:center">' + (p.turnos != null ? p.turnos : '—') + '</td>' +
+          '<td style="padding:4px 6px;text-align:right">' + (p.total != null ? pesos2(p.total) : '—') + '</td>' +
+          '<td style="padding:4px 0 4px 6px;text-align:right;color:var(--dm-gris)">' + (p.pago || '—') + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></details>';
+  }
+
+  /* [8 oct 2026] Corrección de una vez: el pago de Obleas hecho hasta el
+     sábado 3 de oct quedó con corte en el día en que se pulsó «Pagar» (hora
+     UTC), y el turno de ese día no salía en la nómina nueva. Se baja ese
+     corte al 3 de oct: el corte local en cada celular, y el historial
+     (que viaja) solo en el principal, como corrección (DMSync.nuevaVersion). */
+  var K_MIG_CORTE = 'dm_mig_corte_nomina_oct3_v1';
+  function corregirCorteOct3() {
+    try {
+      if (localStorage.getItem(K_MIG_CORTE)) return false;
+      var MAL = function (f) { return esFecha(f) && f >= '2026-10-04' && f <= '2026-10-07'; };
+      var BIEN = '2026-10-03';
+      var hubo = false;
+      var c = leerJSON(K_CORTE, {});
+      if (MAL(c.obleas)) { c.obleas = BIEN; escribirJSON(K_CORTE, c); hubo = true; }
+      if (window.DM_AUTOSYNC_ORIGEN) {
+        var h = leerJSON('obleas_nom_historial', []), iMax = -1;
+        h.forEach(function (x, i) {
+          if (x && esFecha(x.desde) && esFecha(x.hasta) && (iMax < 0 || x.hasta > h[iMax].hasta)) iMax = i;
+        });
+        if (iMax >= 0 && MAL(h[iMax].hasta)) {
+          var viejo = h[iMax], nuevo = JSON.parse(JSON.stringify(viejo));
+          nuevo.hasta = BIEN;
+          if (window.DMSync && DMSync.nuevaVersion) nuevo = DMSync.nuevaVersion('obleas_nom_historial', viejo, nuevo);
+          h[iMax] = nuevo;
+          escribirJSON('obleas_nom_historial', h);
+          hubo = true;
+        }
+      }
+      localStorage.setItem(K_MIG_CORTE, new Date().toISOString());
+      if (hubo) pintar();
+      return hubo;
+    } catch (e) { console.warn('corregirCorteOct3:', e); return false; }
+  }
+  setTimeout(corregirCorteOct3, 6500);
 
   /* ── Ícono propio en la barra de arriba ───────────────────────────────
      Nómina se usa cada 12 días y hasta ahora había que abrir Ajustes y
@@ -13691,7 +13818,7 @@ var DMNomina = (function () {
     try { if (typeof dmNomTab === 'function') dmNomTab('trabajado'); } catch (e) {}
     try {
       var pf = document.getElementById('dm-prest-fecha');
-      if (pf && !pf.value) pf.value = new Date().toISOString().slice(0, 10);
+      if (pf && !pf.value) pf.value = hoyISO2();
     } catch (e) {}
     var m = document.getElementById('dm-modal-nomina');
     if (m) m.classList.add('on');
@@ -13704,6 +13831,7 @@ var DMNomina = (function () {
   return {
     calcular: calcular, liquidar: liquidar, periodo: periodo,
     cortes: cortes, guardarCorte: guardarCorte, pintar: pintar, LINEAS: LINEAS,
+    ponerInicio: ponerInicio, pagados: pagados, corregirCorteOct3: corregirCorteOct3,
     abrirModal: abrirModal, cerrarModal: cerrarModal
   };
 })();
@@ -13726,7 +13854,7 @@ var DMPrestamos = (function () {
 
   function leer() { try { return JSON.parse(localStorage.getItem(K) || '[]'); } catch (e) { return []; } }
   function guardar(a) { try { localStorage.setItem(K, JSON.stringify(a)); } catch (e) {} }
-  function hoyISO3() { return new Date().toISOString().slice(0, 10); }
+  function hoyISO3() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
   function pesos3(v) { return '$' + Math.round(Number(v) || 0).toLocaleString('es-CO'); }
 
   /* Lista única de empleados de las dos líneas */
@@ -20326,7 +20454,7 @@ var DMDemo = (function () {
          para saber, mirando el celular, si ya entró la actualización o si
          todavía está viendo una copia guardada en caché. -->
     <div style="text-align:center;font-size:10.5px;color:var(--dm-gris);
-                margin-top:10px;opacity:.75">Versión del 01/10/2026 22:33</div>
+                margin-top:10px;opacity:.75">Versión del 08/10/2026 17:23</div>
   </div>
 </div>
 
